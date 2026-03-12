@@ -27,10 +27,37 @@ interface ServerStatus {
   command?: string;
   enabled: boolean;
   state: string;
+  status?: string;
   tools_count: number;
 }
 
-async function fetchApi(path: string, options?: RequestInit): Promise<any> {
+interface ToolInfo {
+  name: string;
+  description?: string;
+}
+
+interface HealthResponse {
+  status: string;
+}
+
+interface ReadyResponse {
+  ready: boolean;
+  gateway: string;
+}
+
+interface ToolsStatusResponse {
+  servers: ServerStatus[];
+  sse?: {
+    active_clients?: number;
+    total_events_sent?: number;
+  };
+}
+
+interface ServerArgs {
+  server_name?: string;
+}
+
+async function fetchApi<T = unknown>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
@@ -148,7 +175,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     switch (name) {
       case "gateway_list_servers": {
-        const result = await fetchApi("/process/servers");
+        const result = await fetchApi<{ servers: ServerStatus[] }>("/process/servers");
         const servers: ServerStatus[] = result.servers || [];
 
         const formatted = servers.map((s) =>
@@ -166,12 +193,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "gateway_enable_server": {
-        const serverName = (args as any).server_name;
+        const serverName = (args as ServerArgs | undefined)?.server_name;
         if (!serverName) {
           throw new Error("server_name is required");
         }
 
-        const result = await fetchApi(`/process/servers/${serverName}/enable`, {
+        const result = await fetchApi<{ state: string }>(`/process/servers/${serverName}/enable`, {
           method: "POST",
         });
 
@@ -186,12 +213,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "gateway_disable_server": {
-        const serverName = (args as any).server_name;
+        const serverName = (args as ServerArgs | undefined)?.server_name;
         if (!serverName) {
           throw new Error("server_name is required");
         }
 
-        const result = await fetchApi(`/process/servers/${serverName}/disable`, {
+        const result = await fetchApi<{ state: string }>(`/process/servers/${serverName}/disable`, {
           method: "POST",
         });
 
@@ -206,12 +233,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "gateway_get_server_status": {
-        const serverName = (args as any).server_name;
+        const serverName = (args as ServerArgs | undefined)?.server_name;
         if (!serverName) {
           throw new Error("server_name is required");
         }
 
-        const result = await fetchApi(`/process/servers/${serverName}`);
+        const result = await fetchApi<ServerStatus>(`/process/servers/${serverName}`);
 
         return {
           content: [
@@ -224,15 +251,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "gateway_list_tools": {
-        const serverName = (args as any)?.server_name;
+        const serverName = (args as ServerArgs | undefined)?.server_name;
         const path = serverName
           ? `/process/tools?server=${serverName}`
           : "/process/tools";
 
-        const result = await fetchApi(path);
-        const tools = result.tools || [];
+        const result = await fetchApi<{ tools: ToolInfo[] }>(path);
+        const tools: ToolInfo[] = result.tools || [];
 
-        const formatted = tools.map((t: any) => `- ${t.name}: ${t.description || "(no description)"}`).join("\n");
+        const formatted = tools.map((t) => `- ${t.name}: ${t.description || "(no description)"}`).join("\n");
 
         return {
           content: [
@@ -246,13 +273,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "gateway_health": {
         const [health, ready, status] = await Promise.all([
-          fetchApi("/health"),
-          fetchApi("/ready"),
-          fetchApi("/api/tools/status"),
+          fetchApi<HealthResponse>("/health"),
+          fetchApi<ReadyResponse>("/ready"),
+          fetchApi<ToolsStatusResponse>("/api/tools/status"),
         ]);
 
-        const servers = status.servers || [];
-        const serverSummary = servers.map((s: any) =>
+        const servers: ServerStatus[] = status.servers || [];
+        const serverSummary = servers.map((s) =>
           `  - ${s.name}: ${s.status || s.state}`
         ).join("\n");
 

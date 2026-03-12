@@ -173,10 +173,22 @@ class ProcessRunner:
 
         return base_ttl
 
+    def _should_adjust_ttl(self, current: float, proposed: float) -> bool:
+        """
+        Check if TTL should be adjusted (hysteresis to prevent thrashing).
+
+        Only adjust if change is greater than 30% to prevent oscillation
+        when call rate is near the threshold boundary.
+        """
+        if current == 0:
+            return True
+        change_ratio = abs(proposed - current) / current
+        return change_ratio > 0.3
+
     def _update_ttl(self):
-        """Update current TTL based on usage patterns."""
+        """Update current TTL based on usage patterns with hysteresis."""
         new_ttl = self._calculate_adaptive_ttl()
-        if new_ttl != self._current_ttl:
+        if new_ttl != self._current_ttl and self._should_adjust_ttl(self._current_ttl, new_ttl):
             old_ttl = self._current_ttl
             self._current_ttl = new_ttl
             logger.info(f"{self.config.name} TTL adjusted: {old_ttl:.0f}s -> {new_ttl:.0f}s")

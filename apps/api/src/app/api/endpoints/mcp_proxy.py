@@ -71,22 +71,57 @@ def get_jsonrpc_timeout() -> httpx.Timeout:
 
 # Session-based response queues for ProcessManager responses
 # MCP SSE Transport: responses must be sent via SSE stream, not HTTP response body
-_session_response_queues: dict[str, asyncio.Queue] = {}
+# Each entry stores (queue, last_access_timestamp)
+import time as _time_module
+
+_session_response_queues: dict[str, tuple[asyncio.Queue, float]] = {}
 _session_queues_lock = asyncio.Lock()
+_SESSION_QUEUE_TTL_SECONDS = 3600  # 1 hour
 
 
 async def get_response_queue(session_id: str) -> asyncio.Queue:
     """Get or create a response queue for a session (thread-safe)."""
+    now = _time_module.time()
     async with _session_queues_lock:
-        if session_id not in _session_response_queues:
-            _session_response_queues[session_id] = asyncio.Queue()
-        return _session_response_queues[session_id]
+        if session_id in _session_response_queues:
+            queue, _ = _session_response_queues[session_id]
+            _session_response_queues[session_id] = (queue, now)
+            return queue
+        queue: asyncio.Queue = asyncio.Queue()
+        _session_response_queues[session_id] = (queue, now)
+        return queue
 
 
 async def remove_response_queue(session_id: str):
     """Remove a response queue when session ends (thread-safe)."""
     async with _session_queues_lock:
         _session_response_queues.pop(session_id, None)
+
+
+async def cleanup_stale_queues() -> int:
+    """Remove stale session queues that have been inactive for TTL seconds.
+
+    Returns:
+        Number of queues removed.
+    """
+    now = _time_module.time()
+    threshold = now - _SESSION_QUEUE_TTL_SECONDS
+    removed = 0
+    async with _session_queues_lock:
+        stale_sessions = [
+            sid for sid, (_, last_access) in _session_response_queues.items()
+            if last_access < threshold
+        ]
+        for sid in stale_sessions:
+            _session_response_queues.pop(sid, None)
+            logger.info("Cleaned up stale session queue: %s", sid)
+            removed += 1
+    return removed
+
+
+def get_session_queue_count() -> int:
+    """Get current number of session queues (for monitoring)."""
+    return len(_session_response_queues)
 
 
 class DescriptionMode:

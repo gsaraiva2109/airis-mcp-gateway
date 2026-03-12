@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any, Callable, Dict, List, Optional
 
 from ..repositories.credentials import CredentialRepository
+
+logger = logging.getLogger(__name__)
 
 Subscriber = Callable[[str, int], None]
 
@@ -62,8 +65,9 @@ class CredentialProvider:
         for subscriber in list(self._subs):
             try:
                 subscriber(credential_id, timestamp)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 # Subscribers should be robust; ignore failure to avoid cascade.
+                logger.debug("Subscriber notification failed for %s: %s", credential_id, exc)
                 continue
 
         return result

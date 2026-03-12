@@ -83,7 +83,8 @@
       ],
       "env": {
         "MCP_CONFIG_PATH": "/app/mcp-config.json",
-        "PROFILES_DIR": "/app/profiles"
+        "PROFILES_DIR": "/app/profiles",
+        "HOST_CLAUDE_DIR": "/host-claude"
       },
       "enabled": true,
       "mode": "hot"
@@ -154,10 +155,11 @@
         "@21st-dev/magic@latest"
       ],
       "env": {
-        "API_KEY": "843946a41d42f0efab2510871985a40cc6d0d4aaca73a0c82252ff313f606419"
+        "API_KEY": "${MAGIC_API_KEY}"
       },
       "enabled": true,
-      "mode": "cold"
+      "mode": "cold",
+      "_comment": "Get API key at https://21st.dev"
     },
     "morphllm": {
       "command": "npx",
@@ -166,11 +168,12 @@
         "@morphllm/morphmcp"
       ],
       "env": {
-        "MORPH_API_KEY": "sk-mO-tOX1-qHOuPPK8zY8L7eAM6sDJSNsIB-T0XUvFJ0GgPOls",
+        "MORPH_API_KEY": "${MORPH_API_KEY}",
         "ENABLED_TOOLS": "edit_file,warpgrep_codebase_search"
       },
       "enabled": true,
-      "mode": "cold"
+      "mode": "cold",
+      "_comment": "Get API key at https://morphllm.com"
     },
     "chrome-devtools": {
       "command": "npx",
