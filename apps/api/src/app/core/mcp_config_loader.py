@@ -59,6 +59,12 @@ class McpServerConfig:
     min_ttl: Optional[int] = None
     max_ttl: Optional[int] = None
     adaptive_ttl_enabled: Optional[bool] = None
+    # Tool index for COLD/disabled servers (enables discovery without starting server)
+    tools_index: list[dict] = None
+
+    def __post_init__(self):
+        if self.tools_index is None:
+            self.tools_index = []
 
     def to_process_config(self, idle_timeout: int = 120) -> ProcessConfig:
         """Convert to ProcessConfig for ProcessRunner."""
@@ -187,6 +193,9 @@ def load_mcp_config(config_path: Optional[str] = None) -> dict[str, McpServerCon
         max_ttl = server_def.get("max_ttl")
         adaptive_ttl_enabled = server_def.get("adaptive_ttl_enabled")
 
+        # Parse tools_index for COLD/disabled server discovery
+        tools_index = server_def.get("tools_index", [])
+
         servers[name] = McpServerConfig(
             name=name,
             server_type=server_type,
@@ -200,6 +209,7 @@ def load_mcp_config(config_path: Optional[str] = None) -> dict[str, McpServerCon
             min_ttl=min_ttl,
             max_ttl=max_ttl,
             adaptive_ttl_enabled=adaptive_ttl_enabled,
+            tools_index=tools_index,
         )
 
         logger.debug(f"{name}: type={server_type.value}, mode={mode.value}, enabled={enabled}")

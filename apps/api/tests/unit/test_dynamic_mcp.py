@@ -139,6 +139,69 @@ class TestDynamicMCPFind:
         assert len(results["tools"]) == 0
 
 
+class TestDynamicMCPFindQueryVariants:
+    """Tests for query normalization in find()"""
+
+    def test_find_with_space_matches_hyphen(self, populated_dynamic_mcp):
+        """'sequential thinking' should match 'sequential-thinking' server."""
+        populated_dynamic_mcp._servers["sequential-thinking"] = ServerInfo(
+            name="sequential-thinking", enabled=False, mode="cold",
+            tools_count=1, source="process"
+        )
+        results = populated_dynamic_mcp.find(query="sequential thinking")
+        server_names = [s["name"] for s in results["servers"]]
+        assert "sequential-thinking" in server_names
+
+    def test_find_with_hyphen_matches_no_separator(self, populated_dynamic_mcp):
+        """'sequential-thinking' query should also try 'sequentialthinking'."""
+        populated_dynamic_mcp._tools["sequentialthinking"] = ToolInfo(
+            name="sequentialthinking", server="seq-server",
+            description="Thinking tool", input_schema={}, source="index"
+        )
+        populated_dynamic_mcp._tool_to_server["sequentialthinking"] = "seq-server"
+        results = populated_dynamic_mcp.find(query="sequential-thinking")
+        tool_names = [t["name"] for t in results["tools"]]
+        assert "sequentialthinking" in tool_names
+
+    def test_find_catalog_fallback(self, dynamic_mcp):
+        """When no cache matches, TOOL_CATALOG should be used as fallback."""
+        results = dynamic_mcp.find(query="stripe invoice")
+        # Should find tools from TOOL_CATALOG
+        tool_names = [t["name"] for t in results["tools"]]
+        assert "create_invoice" in tool_names
+
+    def test_find_catalog_fallback_not_used_when_cache_matches(self, populated_dynamic_mcp):
+        """TOOL_CATALOG fallback should not trigger when cache has matches."""
+        results = populated_dynamic_mcp.find(query="entities")
+        # Should find from cache, not catalog
+        assert len(results["tools"]) == 2
+        for t in results["tools"]:
+            assert "[catalog]" not in t.get("description", "")
+
+
+class TestDynamicMCPAutoDiscovery:
+    """Tests for get_server_for_tool_from_index."""
+
+    def test_auto_discovery_finds_tool(self, dynamic_mcp):
+        """Should find server for tool via tools_index."""
+        from unittest.mock import MagicMock
+
+        mock_pm = MagicMock()
+        mock_pm.get_server_names.return_value = ["tavily", "stripe"]
+        mock_pm._server_configs = {
+            "tavily": MagicMock(tools_index=[
+                {"name": "tavily-search", "description": "Search"},
+            ]),
+            "stripe": MagicMock(tools_index=[
+                {"name": "create_customer", "description": "Create customer"},
+            ]),
+        }
+
+        assert dynamic_mcp.get_server_for_tool_from_index("tavily-search", mock_pm) == "tavily"
+        assert dynamic_mcp.get_server_for_tool_from_index("create_customer", mock_pm) == "stripe"
+        assert dynamic_mcp.get_server_for_tool_from_index("nonexistent", mock_pm) is None
+
+
 class TestDynamicMCPSchema:
     """Tests for airis-schema functionality"""
 
@@ -155,6 +218,15 @@ class TestDynamicMCPSchema:
         """Test getting schema for non-existent tool"""
         schema = populated_dynamic_mcp.get_tool_schema("nonexistent")
 
+        assert schema is None
+
+    def test_get_tool_schema_returns_none_for_index_source(self, populated_dynamic_mcp):
+        """Index-sourced tools should return None to trigger auto-discovery."""
+        populated_dynamic_mcp._tools["indexed_tool"] = ToolInfo(
+            name="indexed_tool", server="some-server",
+            description="From index", input_schema={}, source="index"
+        )
+        schema = populated_dynamic_mcp.get_tool_schema("indexed_tool")
         assert schema is None
 
 
@@ -497,7 +569,7 @@ class TestRefreshCacheHotOnly:
 
     @pytest.mark.asyncio
     async def test_refresh_cache_hot_only_skips_cold(self):
-        """refresh_cache_hot_only should only load HOT server tools."""
+        """refresh_cache_hot_only should only load HOT server tools (plus index)."""
         from unittest.mock import AsyncMock, MagicMock
 
         mcp = DynamicMCP()
@@ -506,6 +578,7 @@ class TestRefreshCacheHotOnly:
         mock_pm = MagicMock()
         mock_pm.get_enabled_servers.return_value = ["hot-server", "cold-server"]
         mock_pm.get_hot_servers.return_value = ["hot-server"]
+        mock_pm.get_server_names.return_value = ["hot-server", "cold-server"]
         mock_pm.get_server_status.side_effect = lambda name: {
             "enabled": True,
             "mode": "hot" if name == "hot-server" else "cold",
@@ -523,8 +596,8 @@ class TestRefreshCacheHotOnly:
 
         mock_pm._list_tools_for_server = list_tools
         mock_pm._server_configs = {
-            "hot-server": MagicMock(enabled=True),
-            "cold-server": MagicMock(enabled=True),
+            "hot-server": MagicMock(enabled=True, tools_index=[]),
+            "cold-server": MagicMock(enabled=True, tools_index=[]),
         }
 
         await mcp.refresh_cache_hot_only(mock_pm, docker_tools=None)
@@ -541,6 +614,82 @@ class TestRefreshCacheHotOnly:
         # Verify mode is correctly set
         assert mcp._servers["hot-server"].mode == "hot"
         assert mcp._servers["cold-server"].mode == "cold"
+
+    @pytest.mark.asyncio
+    async def test_refresh_cache_hot_only_loads_tools_index(self):
+        """refresh_cache_hot_only should cache tools from tools_index."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mcp = DynamicMCP()
+
+        mock_pm = MagicMock()
+        mock_pm.get_enabled_servers.return_value = ["hot-server"]
+        mock_pm.get_hot_servers.return_value = ["hot-server"]
+        mock_pm.get_server_names.return_value = ["hot-server", "cold-server"]
+        mock_pm.get_server_status.side_effect = lambda name: {
+            "enabled": name == "hot-server",
+            "mode": "hot" if name == "hot-server" else "cold",
+            "tools_count": 0
+        }
+
+        async def list_tools(name):
+            if name == "hot-server":
+                return [{"name": "hot_tool", "description": "HOT", "inputSchema": {}}]
+            return []
+
+        mock_pm._list_tools_for_server = list_tools
+        mock_pm._server_configs = {
+            "hot-server": MagicMock(enabled=True, tools_index=[]),
+            "cold-server": MagicMock(
+                enabled=False,
+                tools_index=[
+                    {"name": "cold_tool_1", "description": "Cold tool from index"},
+                    {"name": "cold_tool_2", "description": "Another cold tool"},
+                ]
+            ),
+        }
+
+        await mcp.refresh_cache_hot_only(mock_pm, docker_tools=None)
+
+        # HOT tool should be cached
+        assert "hot_tool" in mcp._tools
+        assert mcp._tools["hot_tool"].source == "process"
+
+        # tools_index tools should also be cached
+        assert "cold_tool_1" in mcp._tools
+        assert mcp._tools["cold_tool_1"].source == "index"
+        assert mcp._tools["cold_tool_1"].server == "cold-server"
+        assert "cold_tool_2" in mcp._tools
+
+    @pytest.mark.asyncio
+    async def test_tools_index_does_not_override_live_tools(self):
+        """Live tools should take priority over tools_index entries."""
+        from unittest.mock import MagicMock
+
+        mcp = DynamicMCP()
+
+        mock_pm = MagicMock()
+        mock_pm.get_enabled_servers.return_value = ["server-a"]
+        mock_pm.get_hot_servers.return_value = ["server-a"]
+        mock_pm.get_server_names.return_value = ["server-a"]
+        mock_pm.get_server_status.return_value = {"enabled": True, "mode": "hot", "tools_count": 1}
+
+        async def list_tools(name):
+            return [{"name": "shared_tool", "description": "Live version", "inputSchema": {"live": True}}]
+
+        mock_pm._list_tools_for_server = list_tools
+        mock_pm._server_configs = {
+            "server-a": MagicMock(
+                enabled=True,
+                tools_index=[{"name": "shared_tool", "description": "Index version"}]
+            ),
+        }
+
+        await mcp.refresh_cache_hot_only(mock_pm, docker_tools=None)
+
+        # Live tool should win
+        assert mcp._tools["shared_tool"].description == "Live version"
+        assert mcp._tools["shared_tool"].source == "process"
 
 
 class TestApplySchemaPartitioningDynamicMode:

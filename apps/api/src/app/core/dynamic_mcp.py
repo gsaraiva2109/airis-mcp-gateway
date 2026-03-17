@@ -26,7 +26,7 @@ class ToolInfo:
     server: str
     description: str
     input_schema: dict = field(default_factory=dict)
-    source: str = "process"  # "process" or "docker"
+    source: str = "process"  # "process", "docker", or "index"
 
 
 @dataclass
@@ -225,12 +225,31 @@ class DynamicMCP:
                         source="docker"
                     )
 
+        # Cache tools_index from ALL servers (including COLD/disabled)
+        # This enables discovery without starting servers
+        index_count = 0
+        for name in process_manager.get_server_names():
+            config = process_manager._server_configs.get(name)
+            if config and config.tools_index:
+                for tool_entry in config.tools_index:
+                    tool_name = tool_entry.get("name", "")
+                    if tool_name and tool_name not in new_tools:
+                        new_tools[tool_name] = ToolInfo(
+                            name=tool_name,
+                            server=name,
+                            description=tool_entry.get("description", ""),
+                            input_schema={},
+                            source="index"
+                        )
+                        new_tool_to_server[tool_name] = name
+                        index_count += 1
+
         # Atomic swap - replace all caches at once
         self._tools = new_tools
         self._servers = new_servers
         self._tool_to_server = new_tool_to_server
 
-        logger.info(f"Cached {len(self._tools)} HOT tools from {len(self._servers)} servers (COLD tools on-demand)")
+        logger.info(f"Cached {len(self._tools)} tools ({index_count} from index) from {len(self._servers)} servers (COLD tools on-demand)")
 
     async def load_tools_for_server(
         self,
@@ -269,10 +288,11 @@ class DynamicMCP:
         try:
             tools = await process_manager._list_tools_for_server(server_name)
 
-            # Cache the loaded tools
+            # Cache the loaded tools (overwrite index entries with live data)
             for tool in tools:
                 tool_name = tool.get("name", "")
-                if tool_name and tool_name not in self._tools:
+                existing = self._tools.get(tool_name)
+                if tool_name and (not existing or existing.source == "index"):
                     self._tools[tool_name] = ToolInfo(
                         name=tool_name,
                         server=server_name,
@@ -338,13 +358,26 @@ class DynamicMCP:
 
         query_lower = query.lower() if query else None
 
+        # Build query variants for flexible matching
+        query_variants = []
+        if query_lower:
+            query_variants.append(query_lower)
+            # "sequential thinking" -> "sequential-thinking", "sequential_thinking"
+            query_variants.append(query_lower.replace(" ", "-"))
+            query_variants.append(query_lower.replace(" ", "_"))
+            # "sequential-thinking" -> "sequentialthinking"
+            query_variants.append(query_lower.replace("-", "").replace("_", "").replace(" ", ""))
+            # Deduplicate while preserving order
+            query_variants = list(dict.fromkeys(query_variants))
+
         # Search servers
         for name, info in self._servers.items():
             if server and name != server:
                 continue
 
-            if query_lower and query_lower not in name.lower():
-                continue
+            if query_variants:
+                if not any(v in name.lower() for v in query_variants):
+                    continue
 
             matched_servers.append({
                 "name": info.name,
@@ -358,12 +391,13 @@ class DynamicMCP:
             if server and info.server != server:
                 continue
 
-            if query_lower:
-                # Match against name, description, or server
-                if not (
-                    query_lower in name.lower() or
-                    query_lower in info.description.lower() or
-                    query_lower in info.server.lower()
+            if query_variants:
+                name_lower = name.lower()
+                desc_lower = info.description.lower()
+                server_lower = info.server.lower()
+                if not any(
+                    v in name_lower or v in desc_lower or v in server_lower
+                    for v in query_variants
                 ):
                     continue
 
@@ -376,6 +410,28 @@ class DynamicMCP:
             if len(matched_tools) >= limit:
                 break
 
+        # Fallback: search TOOL_CATALOG for tools not yet in cache
+        if not matched_tools and query_lower:
+            from .tool_suggester import TOOL_CATALOG, _extract_keywords
+            query_keywords = set(_extract_keywords(query))
+            if query_keywords:
+                for server_name, tools in TOOL_CATALOG.items():
+                    if server and server_name != server:
+                        continue
+                    for tool_name, keywords in tools.items():
+                        # Skip tools already in cache
+                        if tool_name in self._tools:
+                            continue
+                        if query_keywords & set(keywords):
+                            matched_tools.append({
+                                "name": tool_name,
+                                "server": server_name,
+                                "description": f"[catalog] Keywords: {', '.join(keywords[:5])}",
+                            })
+
+                if matched_tools:
+                    matched_tools = matched_tools[:limit]
+
         return {
             "servers": matched_servers[:limit],
             "tools": matched_tools,
@@ -384,9 +440,17 @@ class DynamicMCP:
         }
 
     def get_tool_schema(self, tool_name: str) -> Optional[dict]:
-        """Get full schema for a specific tool."""
+        """Get full schema for a specific tool.
+
+        Returns None for index-sourced tools (no real schema available)
+        to trigger auto-discovery and server startup.
+        """
         info = self._tools.get(tool_name)
         if not info:
+            return None
+
+        # Index-sourced tools have no real schema - return None to trigger auto-discovery
+        if info.source == "index":
             return None
 
         return {
@@ -399,6 +463,19 @@ class DynamicMCP:
     def get_server_for_tool(self, tool_name: str) -> Optional[str]:
         """Get server name for a tool."""
         return self._tool_to_server.get(tool_name)
+
+    def get_server_for_tool_from_index(self, tool_name: str, process_manager) -> Optional[str]:
+        """
+        Look up server name from tools_index in mcp-config.json.
+        Used for auto-discovery when tool is not in cache.
+        """
+        for name in process_manager.get_server_names():
+            config = process_manager._server_configs.get(name)
+            if config and config.tools_index:
+                for tool_entry in config.tools_index:
+                    if tool_entry.get("name") == tool_name:
+                        return name
+        return None
 
     def parse_tool_reference(self, tool_ref: str) -> tuple[Optional[str], str]:
         """

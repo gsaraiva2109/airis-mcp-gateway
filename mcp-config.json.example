@@ -8,7 +8,11 @@
       ],
       "env": {},
       "enabled": true,
-      "mode": "cold"
+      "mode": "cold",
+      "tools_index": [
+        {"name": "resolve-library-id", "description": "Resolve a library name to its Context7 ID for documentation lookup"},
+        {"name": "get-library-docs", "description": "Get official documentation for a library by its Context7 ID"}
+      ]
     },
     "fetch": {
       "command": "uvx",
@@ -17,7 +21,10 @@
       ],
       "env": {},
       "enabled": true,
-      "mode": "cold"
+      "mode": "cold",
+      "tools_index": [
+        {"name": "fetch", "description": "Fetch content from a URL and return it as markdown"}
+      ]
     },
     "filesystem": {
       "command": "npx",
@@ -28,7 +35,14 @@
       ],
       "env": {},
       "enabled": false,
-      "mode": "cold"
+      "mode": "cold",
+      "tools_index": [
+        {"name": "read_file", "description": "Read complete contents of a file"},
+        {"name": "write_file", "description": "Write content to a file (create or overwrite)"},
+        {"name": "list_directory", "description": "List directory contents with file types"},
+        {"name": "search_files", "description": "Search for files matching a pattern"},
+        {"name": "move_file", "description": "Move or rename a file or directory"}
+      ]
     },
     "git": {
       "command": "npx",
@@ -38,7 +52,13 @@
       ],
       "env": {},
       "enabled": false,
-      "mode": "cold"
+      "mode": "cold",
+      "tools_index": [
+        {"name": "git_status", "description": "Show working tree status"},
+        {"name": "git_diff", "description": "Show changes between commits or working tree"},
+        {"name": "git_commit", "description": "Create a new commit"},
+        {"name": "git_log", "description": "Show commit history"}
+      ]
     },
     "memory": {
       "command": "npx",
@@ -50,7 +70,16 @@
         "MEMORY_FILE_PATH": "/app/data/memory.json"
       },
       "enabled": true,
-      "mode": "cold"
+      "mode": "cold",
+      "tools_index": [
+        {"name": "create_entities", "description": "Create multiple new entities in the knowledge graph"},
+        {"name": "search_nodes", "description": "Search for nodes in the knowledge graph"},
+        {"name": "add_observations", "description": "Add observations to existing entities"},
+        {"name": "delete_entities", "description": "Delete entities from the knowledge graph"},
+        {"name": "open_nodes", "description": "Open specific nodes by name"},
+        {"name": "create_relations", "description": "Create relations between entities"},
+        {"name": "read_graph", "description": "Read the entire knowledge graph"}
+      ]
     },
     "mindbase": {
       "command": "npx",
@@ -97,7 +126,10 @@
       ],
       "env": {},
       "enabled": true,
-      "mode": "cold"
+      "mode": "cold",
+      "tools_index": [
+        {"name": "sequentialthinking", "description": "Dynamic problem-solving through sequential thinking steps with branching and revision"}
+      ]
     },
     "serena": {
       "profile": "${SERENA_MODE:-serena-remote}",
@@ -114,7 +146,14 @@
       ],
       "env": {},
       "enabled": true,
-      "mode": "cold"
+      "mode": "cold",
+      "tools_index": [
+        {"name": "tavily-search", "description": "Search the web for current information on any topic"},
+        {"name": "tavily-extract", "description": "Extract content from URLs in markdown format"},
+        {"name": "tavily-crawl", "description": "Crawl a website starting from a URL with configurable depth"},
+        {"name": "tavily-map", "description": "Map a website URL structure"},
+        {"name": "tavily-research", "description": "Comprehensive multi-step research on a topic"}
+      ]
     },
     "time": {
       "command": "npx",
@@ -124,7 +163,11 @@
       ],
       "env": {},
       "enabled": false,
-      "mode": "cold"
+      "mode": "cold",
+      "tools_index": [
+        {"name": "get_current_time", "description": "Get current time in a specific timezone"},
+        {"name": "convert_time", "description": "Convert time between timezones"}
+      ]
     },
     "supabase": {
       "command": "npx",
@@ -136,7 +179,12 @@
       ],
       "env": {},
       "enabled": true,
-      "mode": "cold"
+      "mode": "cold",
+      "tools_index": [
+        {"name": "query", "description": "Execute SQL query against a Supabase database"},
+        {"name": "list_tables", "description": "List all tables in the Supabase database"},
+        {"name": "describe_table", "description": "Get schema details for a specific table"}
+      ]
     },
     "playwright": {
       "command": "npx",
@@ -146,7 +194,14 @@
       ],
       "env": {},
       "enabled": true,
-      "mode": "cold"
+      "mode": "cold",
+      "tools_index": [
+        {"name": "browser_navigate", "description": "Navigate to a URL in the browser"},
+        {"name": "browser_screenshot", "description": "Take a screenshot of the current page"},
+        {"name": "browser_click", "description": "Click an element on the page"},
+        {"name": "browser_type", "description": "Type text into an input field"},
+        {"name": "browser_wait_for_page_load", "description": "Wait for the page to finish loading"}
+      ]
     },
     "magic": {
       "command": "npx",
@@ -159,7 +214,10 @@
       },
       "enabled": true,
       "mode": "cold",
-      "_comment": "Get API key at https://21st.dev"
+      "_comment": "Get API key at https://21st.dev",
+      "tools_index": [
+        {"name": "21st_magic_component", "description": "Generate a UI component using 21st.dev Magic"}
+      ]
     },
     "morphllm": {
       "command": "npx",
@@ -173,7 +231,11 @@
       },
       "enabled": true,
       "mode": "cold",
-      "_comment": "Get API key at https://morphllm.com"
+      "_comment": "Get API key at https://morphllm.com",
+      "tools_index": [
+        {"name": "edit_file", "description": "Edit a file using AI-powered fast apply"},
+        {"name": "warpgrep_codebase_search", "description": "Search codebase using semantic code search"}
+      ]
     },
     "chrome-devtools": {
       "command": "npx",
@@ -183,7 +245,12 @@
       ],
       "env": {},
       "enabled": true,
-      "mode": "cold"
+      "mode": "cold",
+      "tools_index": [
+        {"name": "devtools_evaluate", "description": "Execute JavaScript in the browser DevTools console"},
+        {"name": "devtools_screenshot", "description": "Take a screenshot via Chrome DevTools Protocol"},
+        {"name": "devtools_network", "description": "Monitor network requests via DevTools"}
+      ]
     },
     "stripe": {
       "command": "npx",
@@ -197,7 +264,14 @@
       "env": {},
       "enabled": false,
       "mode": "cold",
-      "_comment": "Set STRIPE_SECRET_KEY in .env"
+      "_comment": "Set STRIPE_SECRET_KEY in .env",
+      "tools_index": [
+        {"name": "create_customer", "description": "Create a new Stripe customer"},
+        {"name": "create_invoice", "description": "Create a new invoice for a customer"},
+        {"name": "create_payment_intent", "description": "Create a payment intent for processing payments"},
+        {"name": "list_customers", "description": "List Stripe customers"},
+        {"name": "list_invoices", "description": "List invoices with optional filters"}
+      ]
     },
     "twilio": {
       "command": "npx",
@@ -226,7 +300,13 @@
         "CLOUDFLARE_ACCOUNT_ID": "${CLOUDFLARE_ACCOUNT_ID}"
       },
       "enabled": false,
-      "mode": "cold"
+      "mode": "cold",
+      "tools_index": [
+        {"name": "cloudflare_kv_get", "description": "Get a value from Cloudflare KV"},
+        {"name": "cloudflare_kv_put", "description": "Put a value in Cloudflare KV"},
+        {"name": "cloudflare_workers_list", "description": "List Cloudflare Workers"},
+        {"name": "cloudflare_dns_records_list", "description": "List DNS records for a zone"}
+      ]
     },
     "github": {
       "command": "npx",
@@ -238,7 +318,14 @@
         "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
       },
       "enabled": true,
-      "mode": "cold"
+      "mode": "cold",
+      "tools_index": [
+        {"name": "create_issue", "description": "Create a new GitHub issue"},
+        {"name": "list_issues", "description": "List issues in a repository"},
+        {"name": "create_pull_request", "description": "Create a new pull request"},
+        {"name": "search_repositories", "description": "Search for GitHub repositories"},
+        {"name": "get_file_contents", "description": "Get contents of a file in a repository"}
+      ]
     },
     "postgres": {
       "command": "npx",
@@ -249,7 +336,10 @@
       ],
       "env": {},
       "enabled": false,
-      "mode": "cold"
+      "mode": "cold",
+      "tools_index": [
+        {"name": "query", "description": "Execute a SQL query against the PostgreSQL database"}
+      ]
     }
   },
   "profiles": {

@@ -1356,10 +1356,13 @@ async def handle_airis_find(rpc_request: Dict[str, Any], session_id: Optional[st
 
     # Always ensure servers are cached (even if tools already exist)
     # This is needed because tools/list populates tools but not necessarily servers
-    if not dynamic_mcp._servers:
+    # Check for process servers specifically (Docker servers may already be pre-cached)
+    has_process_servers = any(s.source == "process" for s in dynamic_mcp._servers.values())
+    if not has_process_servers:
         logger.info("Server cache empty, refreshing...")
-        # Cache server info for ALL enabled process servers (including COLD)
-        for name in process_manager.get_enabled_servers():
+        # Cache server info for ALL servers (including COLD and disabled)
+        index_count = 0
+        for name in process_manager.get_server_names():
             status = process_manager.get_server_status(name)
             dynamic_mcp._servers[name] = ServerInfo(
                 name=name,
@@ -1368,8 +1371,23 @@ async def handle_airis_find(rpc_request: Dict[str, Any], session_id: Optional[st
                 tools_count=status.get("tools_count", 0),
                 source="process"
             )
+            # Also cache tools_index entries for COLD/disabled servers
+            config = process_manager._server_configs.get(name)
+            if config and config.tools_index:
+                for tool_entry in config.tools_index:
+                    tool_name = tool_entry.get("name", "")
+                    if tool_name and tool_name not in dynamic_mcp._tools:
+                        dynamic_mcp._tools[tool_name] = ToolInfo(
+                            name=tool_name,
+                            server=name,
+                            description=tool_entry.get("description", ""),
+                            input_schema={},
+                            source="index"
+                        )
+                        dynamic_mcp._tool_to_server[tool_name] = name
+                        index_count += 1
 
-        logger.info(f"Cached {len(dynamic_mcp._servers)} servers")
+        logger.info(f"Cached {len(dynamic_mcp._servers)} servers, {index_count} tools from index")
 
     # Auto-refresh ProcessManager tools if not yet cached
     # (Docker Gateway tools may be pre-cached at startup, but we still need ProcessManager tools)
@@ -1519,6 +1537,14 @@ async def handle_airis_exec(rpc_request: Dict[str, Any], session_id: Optional[st
 
     logger.info(f"airis-exec: {tool_ref} -> server={server_name}, tool={tool_name}")
 
+    process_manager = get_process_manager()
+
+    # Auto-discovery: if tool not in cache, try tools_index to find the server
+    if not server_name:
+        server_name = dynamic_mcp.get_server_for_tool_from_index(tool_name, process_manager)
+        if server_name:
+            logger.info(f"Auto-discovered tool '{tool_name}' on server '{server_name}' via tools_index")
+
     if not server_name:
         return Response(
             content=json.dumps({
@@ -1532,9 +1558,6 @@ async def handle_airis_exec(rpc_request: Dict[str, Any], session_id: Optional[st
             status_code=200,
             media_type="application/json"
         )
-
-    # Route to ProcessManager (with auto-enable for COLD mode servers)
-    process_manager = get_process_manager()
     if process_manager.is_process_server(server_name):
         config = process_manager._server_configs.get(server_name)
 
@@ -1694,6 +1717,15 @@ async def handle_airis_schema(rpc_request: Dict[str, Any], session_id: Optional[
                 "description": description or "",
                 "inputSchema": full_schema
             }
+
+    # Auto-discovery: if schema not found, try loading from tools_index server
+    if not schema:
+        process_manager = get_process_manager()
+        server_name = dynamic_mcp.get_server_for_tool_from_index(tool_name, process_manager)
+        if server_name:
+            logger.info(f"Auto-loading schema for '{tool_name}' from server '{server_name}'")
+            tools = await dynamic_mcp.load_tools_for_server(server_name, process_manager, force_enable=True)
+            schema = dynamic_mcp.get_tool_schema(tool_name)
 
     if not schema:
         error_data = {
