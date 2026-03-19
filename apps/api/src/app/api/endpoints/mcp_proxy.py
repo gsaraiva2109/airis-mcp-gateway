@@ -466,7 +466,6 @@ async def proxy_sse_stream(request: Request):
                                         match = re.search(r'sessionid=([A-Z0-9]+)', data_str)
                                         if match:
                                             captured_session_id = match.group(1)
-                                            endpoint_url = data_str.strip()
                                             logger.info(f"Captured endpoint URL with sessionid={captured_session_id}")
                                             # Create response queue for this session
                                             await get_response_queue(captured_session_id)
