@@ -271,6 +271,38 @@ def _extract_server_name_from_tool(tool_name: str) -> Optional[str]:
     return parts[0] if parts else None
 
 
+class SSEEventBuffer:
+    """
+    Buffers SSE lines and emits complete events atomically.
+    """
+    def __init__(self):
+        self.buffer: list[str] = []
+        self.current_event_type: Optional[str] = None
+    
+    def add_line(self, line: str) -> Optional[str]:
+        if line == "":
+            if self.buffer:
+                complete_event = "\n".join(self.buffer) + "\n\n"
+                result = complete_event
+                self.buffer = []
+                self.current_event_type = None
+                return result
+            return None
+        else:
+            self.buffer.append(line)
+            if line.startswith("event:"):
+                self.current_event_type = line[6:].strip()
+            return None
+    
+    def flush(self) -> Optional[str]:
+        if self.buffer:
+            complete_event = "\n".join(self.buffer) + "\n\n"
+            self.buffer = []
+            self.current_event_type = None
+            return complete_event
+        return None
+
+
 async def proxy_sse_stream(request: Request):
     """
     SSEストリームをDocker MCP GatewayからProxyしてschema partitioning適用
@@ -288,6 +320,7 @@ async def proxy_sse_stream(request: Request):
     session_id = request.query_params.get("sessionid")  # セッションID追跡
     endpoint_url = None  # エンドポイントURL追跡
     captured_session_id = None  # Gateway から取得したセッションID
+    sse_buffer = SSEEventBuffer()
 
     # Codex streamable_http sometimes POSTs to /sse with Content-Length headers.
     # Strip entity headers so the proxied GET doesn't advertise a body it never sends.
@@ -410,101 +443,117 @@ async def proxy_sse_stream(request: Request):
                         gateway_task = None
                         line = data
 
-                        if not line:
-                            yield "\n"
-                            continue
+                        complete_event = sse_buffer.add_line(line)
+                        if complete_event:
+                            # Parse the complete event to extract endpoint URL or intercept JSON
+                            lines = complete_event.strip().split("\n")
+                            event_type = None
+                            data_lines = []
+                            
+                            for ev_line in lines:
+                                if ev_line.startswith("event:"):
+                                    event_type = ev_line[6:].strip()
+                                elif ev_line.startswith("data:"):
+                                    data_lines.append(ev_line[5:].lstrip())
+                            
+                            if data_lines:
+                                data_str = "\n".join(data_lines)
 
-                        # SSE形式: "event: xxx\n" or "data: {...}\n\n"
-                        if line.startswith("event: endpoint"):
-                            yield f"{line}\n"
-                            continue
+                                # Check if it's an endpoint URL (not JSON)
+                                if not data_str.startswith("{") and not data_str.startswith("["):
+                                    if "sessionid=" in data_str:
+                                        import re
+                                        match = re.search(r'sessionid=([A-Z0-9]+)', data_str)
+                                        if match:
+                                            captured_session_id = match.group(1)
+                                            endpoint_url = data_str.strip()
+                                            logger.info(f"Captured endpoint URL with sessionid={captured_session_id}")
+                                            # Create response queue for this session
+                                            await get_response_queue(captured_session_id)
+                                    yield complete_event
+                                    continue
 
-                        if line.startswith("data: "):
-                            data_str = line[6:]  # "data: " を除去
+                                try:
+                                    json_data = json.loads(data_str)
 
-                            # Check if it's an endpoint URL (not JSON)
-                            if not data_str.startswith("{") and not data_str.startswith("["):
-                                # Extract sessionid from endpoint URL if present
-                                if "sessionid=" in data_str:
-                                    import re
-                                    match = re.search(r'sessionid=([A-Z0-9]+)', data_str)
-                                    if match:
-                                        captured_session_id = match.group(1)
-                                        endpoint_url = data_str.strip()
-                                        logger.info(f"Captured endpoint URL with sessionid={captured_session_id}")
-                                        # Create response queue for this session
-                                        await get_response_queue(captured_session_id)
-                                yield f"{line}\n"
-                                continue
+                                    # initialize リクエストを検出（SSEストリームで見えることはないが念のため）
+                                    if isinstance(json_data, dict) and json_data.get("method") == "initialize":
+                                        initialize_request_id = json_data.get("id")
+                                        logger.info(f"Detected initialize request (id={initialize_request_id})")
+                                        await protocol_logger.log_message("client→server", json_data, {"phase": "initialize"})
 
-                            try:
-                                json_data = json.loads(data_str)
+                                    # tools/list レスポンスをインターセプト
+                                    if isinstance(json_data, dict) and "result" in json_data and "tools" in json_data.get("result", {}):
+                                        await protocol_logger.log_message("client→server", json_data, {"phase": "tools_list"})
+                                        json_data = await apply_schema_partitioning(json_data)
+                                        await protocol_logger.log_message("server→client", json_data, {"phase": "tools_list"})
 
-                                # initialize リクエストを検出（SSEストリームで見えることはないが念のため）
-                                if isinstance(json_data, dict) and json_data.get("method") == "initialize":
-                                    initialize_request_id = json_data.get("id")
-                                    logger.info(f"Detected initialize request (id={initialize_request_id})")
-                                    await protocol_logger.log_message("client→server", json_data, {"phase": "initialize"})
+                                    # prompts/list レスポンスをインターセプト（Process MCP サーバーのプロンプトを追加）
+                                    if isinstance(json_data, dict) and "result" in json_data and "prompts" in json_data.get("result", {}):
+                                        json_data = await apply_prompts_merging(json_data)
 
-                                # tools/list レスポンスをインターセプト
-                                if isinstance(json_data, dict) and "result" in json_data and "tools" in json_data.get("result", {}):
-                                    await protocol_logger.log_message("client→server", json_data, {"phase": "tools_list"})
-                                    json_data = await apply_schema_partitioning(json_data)
-                                    await protocol_logger.log_message("server→client", json_data, {"phase": "tools_list"})
+                                    # initialize response を検出したら instructions を追加
+                                    is_initialize_response = (
+                                        isinstance(json_data, dict) and
+                                        "result" in json_data and
+                                        isinstance(json_data.get("result"), dict) and
+                                        "protocolVersion" in json_data.get("result", {})
+                                    )
+                                    if is_initialize_response:
+                                        from ...core.mcp_config_loader import load_mcp_config
+                                        server_configs = load_mcp_config()
+                                        json_data["result"]["instructions"] = compile_instructions(server_configs)
 
-                                # prompts/list レスポンスをインターセプト（Process MCP サーバーのプロンプトを追加）
-                                if isinstance(json_data, dict) and "result" in json_data and "prompts" in json_data.get("result", {}):
-                                    json_data = await apply_prompts_merging(json_data)
+                                    # Rebuild the event with the modified JSON
+                                    new_event_parts = []
+                                    if event_type:
+                                        new_event_parts.append(f"event: {event_type}")
+                                    new_event_parts.append(f"data: {json.dumps(json_data)}")
+                                    new_event_parts.append("")
+                                    new_event_parts.append("")
+                                    
+                                    yield "\n".join(new_event_parts)
 
-                                # initialize response を検出したら instructions を追加
-                                is_initialize_response = (
-                                    isinstance(json_data, dict) and
-                                    "result" in json_data and
-                                    isinstance(json_data.get("result"), dict) and
-                                    "protocolVersion" in json_data.get("result", {})
-                                )
-                                if is_initialize_response:
-                                    from ...core.mcp_config_loader import load_mcp_config
-                                    server_configs = load_mcp_config()
-                                    json_data["result"]["instructions"] = compile_instructions(server_configs)
+                                    # initialize responseを検出したらGatewayに notifications/initialized を POST
+                                    if is_initialize_response:
 
-                                # 変換後のデータを返す
-                                yield f"data: {json.dumps(json_data)}\n\n"
+                                        logger.info(f"Detected initialize response, sending initialized notification to Gateway")
+                                        await protocol_logger.log_message("server→client", json_data, {"phase": "initialize"})
 
-                                # initialize responseを検出したらGatewayに notifications/initialized を POST
-                                if is_initialize_response:
+                                        # Gateway に notifications/initialized を POST
+                                        initialized_notification = {
+                                            "jsonrpc": "2.0",
+                                            "method": "notifications/initialized"
+                                        }
 
-                                    logger.info(f"Detected initialize response, sending initialized notification to Gateway")
-                                    await protocol_logger.log_message("server→client", json_data, {"phase": "initialize"})
+                                        # sessionid を使って Gateway に POST
+                                        if captured_session_id:
+                                            gateway_post_url = f"{settings.MCP_GATEWAY_URL.rstrip('/')}/sse?sessionid={captured_session_id}"
+                                            try:
+                                                post_response = await client.post(
+                                                    gateway_post_url,
+                                                    json=initialized_notification,
+                                                    headers={"Content-Type": "application/json"}
+                                                )
+                                                logger.info(f"Sent initialized notification to Gateway: {post_response.status_code}")
+                                            except Exception as e:
+                                                logger.error(f"Failed to send initialized notification: {e}")
+                                        else:
+                                            logger.info("No sessionid available, cannot send initialized notification")
 
-                                    # Gateway に notifications/initialized を POST
-                                    initialized_notification = {
-                                        "jsonrpc": "2.0",
-                                        "method": "notifications/initialized"
-                                    }
-
-                                    # sessionid を使って Gateway に POST
-                                    if captured_session_id:
-                                        gateway_post_url = f"{settings.MCP_GATEWAY_URL.rstrip('/')}/sse?sessionid={captured_session_id}"
-                                        try:
-                                            post_response = await client.post(
-                                                gateway_post_url,
-                                                json=initialized_notification,
-                                                headers={"Content-Type": "application/json"}
-                                            )
-                                            logger.info(f"Sent initialized notification to Gateway: {post_response.status_code}")
-                                        except Exception as e:
-                                            logger.error(f"Failed to send initialized notification: {e}")
-                                    else:
-                                        logger.info("No sessionid available, cannot send initialized notification")
-
-                            except json.JSONDecodeError as e:
-                                # Log malformed JSON for debugging (truncate to avoid log spam)
-                                logger.info(f"Malformed JSON in SSE data: {str(e)[:100]}")
-                                yield f"{line}\n"
-                        else:
-                            yield f"{line}\n"
+                                except json.JSONDecodeError as e:
+                                    # Log malformed JSON for debugging (truncate to avoid log spam)
+                                    logger.info(f"Malformed JSON in SSE data: {str(e)[:100]}")
+                                    yield complete_event
+                            else:
+                                yield complete_event
             finally:
+                # Flush any remaining buffered SSE event
+                if getattr(sse_buffer, 'buffer', None):
+                    remaining = sse_buffer.flush()
+                    if remaining:
+                        yield remaining
+                
                 # Cancel any pending tasks to prevent "Task exception was never retrieved"
                 for task in [gateway_task, queue_task, keepalive_task]:
                     if task is not None and not task.done():
