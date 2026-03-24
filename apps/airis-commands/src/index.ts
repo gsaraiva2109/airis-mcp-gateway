@@ -2,13 +2,10 @@
 /**
  * AIRIS Commands MCP Server
  *
- * Provides utility commands for AIRIS MCP Gateway:
- * - airis_config_get: Get current mcp-config.json
- * - airis_config_set: Update server configuration
- * - airis_profile_save: Save current config as a profile
- * - airis_profile_load: Load a saved profile
- * - airis_profile_list: List saved profiles
- * - airis_quick_setup: Interactive setup wizard
+ * Config management tools that require file-system writes to mcp-config.json:
+ * - airis_config_add_server / airis_config_remove_server
+ * - airis_profile_save / airis_profile_load / airis_profile_list
+ * - airis_mcp_detect (repo scan → auto-suggest servers)
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -18,14 +15,11 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import * as fs from "fs/promises";
-import * as os from "os";
 import * as path from "path";
 
 const CONFIG_PATH = process.env.MCP_CONFIG_PATH || "/app/mcp-config.json";
 const PROFILES_DIR = process.env.PROFILES_DIR || "/app/profiles";
 const WORKSPACE_DIR = process.env.HOST_WORKSPACE_DIR || "/workspace/host";
-// Host home directory for accessing ~/.claude/ (mounted in Docker)
-const HOST_CLAUDE_DIR = process.env.HOST_CLAUDE_DIR || path.join(os.homedir(), ".claude");
 
 // MCP mapping database - maps tech stack to official MCPs
 const MCP_MAPPINGS: Record<string, {
@@ -158,38 +152,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       // ── MCP Gateway Config Management ──
       {
-        name: "airis_config_get",
-        description: "Get the current MCP gateway configuration. Returns all servers with their command, args, env, and enabled status as JSON. Use this to understand what MCP servers are available and their current state. Pass server_name to get a single server's config.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            server_name: {
-              type: "string",
-              description: "Get config for this server only (e.g., 'supabase', 'playwright'). Omit to get all servers.",
-            },
-          },
-          required: [],
-        },
-      },
-      {
-        name: "airis_config_set_enabled",
-        description: "Enable or disable an MCP server. The change is written to mcp-config.json. Requires gateway restart to take effect. Use airis_config_get first to see available servers.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            server_name: {
-              type: "string",
-              description: "Server name as it appears in mcp-config.json (e.g., 'supabase', 'stripe')",
-            },
-            enabled: {
-              type: "boolean",
-              description: "true to enable, false to disable",
-            },
-          },
-          required: ["server_name", "enabled"],
-        },
-      },
-      {
         name: "airis_config_add_server",
         description: "Add a new MCP server to the gateway configuration. Specify the command (npx, uvx, node), args, and optional env vars. The server is enabled by default. Requires gateway restart. Use airis_mcp_detect first to auto-discover servers for your tech stack.",
         inputSchema: {
@@ -274,37 +236,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
 
-      // ── Quick Actions ──
-      {
-        name: "airis_quick_enable",
-        description: "Enable multiple MCP servers at once by name. Useful for quickly activating a set of servers (e.g., ['supabase', 'stripe', 'playwright']). Skips servers not found in config. Requires gateway restart.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            servers: {
-              type: "array",
-              items: { type: "string" },
-              description: "List of server names to enable (e.g., ['supabase', 'stripe'])",
-            },
-          },
-          required: ["servers"],
-        },
-      },
-      {
-        name: "airis_quick_disable_all",
-        description: "Disable all MCP servers at once, optionally keeping some enabled. Useful for reducing resource usage or isolating specific servers for debugging. Requires gateway restart.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            except: {
-              type: "array",
-              items: { type: "string" },
-              description: "Servers to keep enabled (e.g., ['memory', 'sequential-thinking']). Omit to disable all.",
-            },
-          },
-          required: [],
-        },
-      },
+      // ── Discovery ──
       {
         name: "airis_mcp_detect",
         description: "Scan a repository's package.json/requirements.txt to detect tech stack and suggest relevant MCP servers. For example, finding '@supabase/supabase-js' suggests adding the Supabase MCP server. Set autoAdd=true to automatically add detected servers (disabled by default, so you can set env vars first).",
@@ -324,98 +256,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
 
-      // ── Claude Code Rules Management ──
-      {
-        name: "airis_rules_list",
-        description: "List all Claude Code rule files in ~/.claude/rules/ with their full content. Rules are markdown files that Claude Code loads as system instructions for every conversation. Use this to understand what rules are currently active before adding, updating, or removing rules.",
-        inputSchema: {
-          type: "object",
-          properties: {},
-          required: [],
-        },
-      },
-      {
-        name: "airis_rules_write",
-        description: "Create or overwrite a Claude Code rule file in ~/.claude/rules/. Rules are markdown files that Claude Code automatically loads as instructions. Use descriptive filenames like 'docker-first.md', 'commit-format.md'. Content should be concise markdown with clear directives. Changes take effect on the next Claude Code conversation.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            filename: {
-              type: "string",
-              description: "Rule filename ending in .md (e.g., 'docker-first.md', 'naming-conventions.md'). No path separators allowed.",
-            },
-            content: {
-              type: "string",
-              description: "Rule content in markdown. Start with a # heading. Keep rules focused on a single topic. Use tables for forbidden/alternative patterns.",
-            },
-          },
-          required: ["filename", "content"],
-        },
-      },
-      {
-        name: "airis_rules_delete",
-        description: "Delete a Claude Code rule file from ~/.claude/rules/. The rule will no longer be loaded in new conversations. Use airis_rules_list first to see current rules and their filenames.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            filename: {
-              type: "string",
-              description: "Exact filename to delete (e.g., 'airis-docker-first.md'). Use airis_rules_list to see available files.",
-            },
-          },
-          required: ["filename"],
-        },
-      },
-
-      // ── Claude Code Status & Diagnostics ──
-      {
-        name: "airis_claude_status",
-        description: "Get a comprehensive overview of the Claude Code configuration. Returns: (1) list of rule files in ~/.claude/rules/, (2) global ~/.claude/CLAUDE.md existence and preview, (3) ~/.claude/settings.json content (hooks, permissions), (4) project-level CLAUDE.md existence and preview. Use this as the starting point to understand and optimize a user's Claude Code setup.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            project_path: {
-              type: "string",
-              description: "Project directory to check for project-level CLAUDE.md (default: current workspace). Also checks for manifest.toml in this path.",
-            },
-          },
-          required: [],
-        },
-      },
-
-      // ── Manifest & Guard Tools ──
-      {
-        name: "airis_manifest_read",
-        description: "Read an airis manifest.toml file and return its raw TOML content. The manifest defines the workspace: apps, libs, commands, guards (forbidden commands), remap rules, Docker config, and version catalog. Use this to understand project structure before generating rules or checking guards.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            manifest_path: {
-              type: "string",
-              description: "Absolute path to manifest.toml. Default: WORKSPACE_DIR/manifest.toml. For monorepos, each app may have its own manifest.",
-            },
-          },
-          required: [],
-        },
-      },
-      {
-        name: "airis_guard_check",
-        description: "Check if a command is blocked by manifest.toml [guards]. Returns {allowed: true} if safe, or {allowed: false, reason: '...', remap_to: '...'} if blocked. The remap_to field shows the safe alternative from [remap] section (e.g., 'pnpm install' → 'airis install'). Use this before executing commands in Docker-first projects to prevent host pollution.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            command: {
-              type: "string",
-              description: "Full command to check (e.g., 'pnpm install', 'npm run build', 'docker compose up')",
-            },
-            manifest_path: {
-              type: "string",
-              description: "Path to manifest.toml containing [guards] section. Default: WORKSPACE_DIR/manifest.toml.",
-            },
-          },
-          required: ["command"],
-        },
-      },
     ],
   };
 });
@@ -426,57 +266,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     switch (name) {
-      case "airis_config_get": {
-        const config = await readConfig();
-        const serverName = (args as any)?.server_name;
-
-        if (serverName) {
-          const serverConfig = config.mcpServers[serverName];
-          if (!serverConfig) {
-            throw new Error(`Server not found: ${serverName}`);
-          }
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({ [serverName]: serverConfig }, null, 2),
-              },
-            ],
-          };
-        }
-
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(config, null, 2),
-            },
-          ],
-        };
-      }
-
-      case "airis_config_set_enabled": {
-        const config = await readConfig();
-        const serverName = (args as any).server_name;
-        const enabled = (args as any).enabled;
-
-        if (!config.mcpServers[serverName]) {
-          throw new Error(`Server not found: ${serverName}`);
-        }
-
-        config.mcpServers[serverName].enabled = enabled;
-        await writeConfig(config);
-
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Server "${serverName}" ${enabled ? "enabled" : "disabled"} in config. Restart API to apply.`,
-            },
-          ],
-        };
-      }
-
       case "airis_config_add_server": {
         const config = await readConfig();
         const { name: serverName, command, args: cmdArgs, env, enabled } = args as any;
@@ -584,58 +373,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text",
               text: `Saved profiles:\n${profiles.map((p) => `- ${p}`).join("\n")}`,
-            },
-          ],
-        };
-      }
-
-      case "airis_quick_enable": {
-        const config = await readConfig();
-        const servers = (args as any).servers as string[];
-        const enabled: string[] = [];
-        const notFound: string[] = [];
-
-        for (const serverName of servers) {
-          if (config.mcpServers[serverName]) {
-            config.mcpServers[serverName].enabled = true;
-            enabled.push(serverName);
-          } else {
-            notFound.push(serverName);
-          }
-        }
-
-        await writeConfig(config);
-
-        let message = `Enabled: ${enabled.join(", ")}`;
-        if (notFound.length > 0) {
-          message += `\nNot found: ${notFound.join(", ")}`;
-        }
-        message += "\nRestart API to apply.";
-
-        return {
-          content: [{ type: "text", text: message }],
-        };
-      }
-
-      case "airis_quick_disable_all": {
-        const config = await readConfig();
-        const except = ((args as any)?.except as string[]) || [];
-        const disabled: string[] = [];
-
-        for (const [serverName, serverConfig] of Object.entries(config.mcpServers)) {
-          if (!except.includes(serverName)) {
-            serverConfig.enabled = false;
-            disabled.push(serverName);
-          }
-        }
-
-        await writeConfig(config);
-
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Disabled ${disabled.length} servers (kept: ${except.join(", ") || "none"}). Restart API to apply.`,
             },
           ],
         };
@@ -787,217 +524,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{ type: "text", text: output }],
         };
-      }
-
-      case "airis_rules_list": {
-        const rulesDir = path.join(HOST_CLAUDE_DIR, "rules");
-        try {
-          const entries = await fs.readdir(rulesDir);
-          const rules: Array<{ filename: string; content: string }> = [];
-
-          for (const entry of entries) {
-            if (!entry.endsWith(".md")) continue;
-            const filePath = path.join(rulesDir, entry);
-            const content = await fs.readFile(filePath, "utf-8");
-            rules.push({ filename: entry, content });
-          }
-
-          if (rules.length === 0) {
-            return {
-              content: [{ type: "text", text: `No rules found in ${rulesDir}` }],
-            };
-          }
-
-          let output = `## Claude Code Rules (${rules.length} files)\n\n`;
-          for (const rule of rules) {
-            output += `### ${rule.filename}\n\`\`\`markdown\n${rule.content}\n\`\`\`\n\n`;
-          }
-
-          return { content: [{ type: "text", text: output }] };
-        } catch {
-          return {
-            content: [{ type: "text", text: `Rules directory not found: ${rulesDir}` }],
-          };
-        }
-      }
-
-      case "airis_rules_write": {
-        const { filename, content: ruleContent } = args as { filename: string; content: string };
-
-        // Validate filename
-        if (filename.includes("/") || filename.includes("\\") || filename.includes("..")) {
-          throw new Error("Invalid filename: must not contain path separators or '..'");
-        }
-        if (!filename.endsWith(".md")) {
-          throw new Error("Filename must end with .md");
-        }
-
-        const rulesWriteDir = path.join(HOST_CLAUDE_DIR, "rules");
-        await fs.mkdir(rulesWriteDir, { recursive: true });
-
-        const rulePath = path.join(rulesWriteDir, filename);
-        await fs.writeFile(rulePath, ruleContent, "utf-8");
-
-        return {
-          content: [{ type: "text", text: `Rule written: ${rulePath}` }],
-        };
-      }
-
-      case "airis_rules_delete": {
-        const { filename: deleteFilename } = args as { filename: string };
-
-        if (deleteFilename.includes("/") || deleteFilename.includes("\\") || deleteFilename.includes("..")) {
-          throw new Error("Invalid filename: must not contain path separators or '..'");
-        }
-
-        const deleteRulePath = path.join(HOST_CLAUDE_DIR, "rules", deleteFilename);
-
-        try {
-          await fs.access(deleteRulePath);
-          await fs.unlink(deleteRulePath);
-          return {
-            content: [{ type: "text", text: `Rule deleted: ${deleteRulePath}` }],
-          };
-        } catch {
-          throw new Error(`Rule not found: ${deleteRulePath}`);
-        }
-      }
-
-      case "airis_claude_status": {
-        const projectPath = (args as { project_path?: string })?.project_path || WORKSPACE_DIR;
-        const status: Record<string, unknown> = {};
-
-        // Check ~/.claude/rules/
-        const statusRulesDir = path.join(HOST_CLAUDE_DIR, "rules");
-        try {
-          const ruleFiles = await fs.readdir(statusRulesDir);
-          status.rules = ruleFiles.filter(f => f.endsWith(".md"));
-        } catch {
-          status.rules = null;
-        }
-
-        // Check ~/.claude/CLAUDE.md
-        const globalClaudeMd = path.join(HOST_CLAUDE_DIR, "CLAUDE.md");
-        try {
-          const content = await fs.readFile(globalClaudeMd, "utf-8");
-          status.global_claude_md = {
-            exists: true,
-            size: content.length,
-            preview: content.substring(0, 500),
-          };
-        } catch {
-          status.global_claude_md = { exists: false };
-        }
-
-        // Check ~/.claude/settings.json
-        const settingsPath = path.join(HOST_CLAUDE_DIR, "settings.json");
-        try {
-          const settingsContent = await fs.readFile(settingsPath, "utf-8");
-          status.settings = JSON.parse(settingsContent);
-        } catch {
-          status.settings = null;
-        }
-
-        // Check project CLAUDE.md
-        const projectClaudeMd = path.join(projectPath, "CLAUDE.md");
-        try {
-          const content = await fs.readFile(projectClaudeMd, "utf-8");
-          status.project_claude_md = {
-            exists: true,
-            path: projectClaudeMd,
-            size: content.length,
-            preview: content.substring(0, 500),
-          };
-        } catch {
-          status.project_claude_md = { exists: false, path: projectClaudeMd };
-        }
-
-        return {
-          content: [{ type: "text", text: JSON.stringify(status, null, 2) }],
-        };
-      }
-
-      case "airis_manifest_read": {
-        const manifestPath = (args as { manifest_path?: string })?.manifest_path
-          || path.join(WORKSPACE_DIR, "manifest.toml");
-
-        try {
-          const manifestContent = await fs.readFile(manifestPath, "utf-8");
-          return {
-            content: [{ type: "text", text: `# manifest.toml (${manifestPath})\n\n\`\`\`toml\n${manifestContent}\n\`\`\`` }],
-          };
-        } catch {
-          throw new Error(`manifest.toml not found at: ${manifestPath}`);
-        }
-      }
-
-      case "airis_guard_check": {
-        const { command: checkCommand, manifest_path: guardManifestPath } = args as {
-          command: string;
-          manifest_path?: string;
-        };
-        const mPath = guardManifestPath || path.join(WORKSPACE_DIR, "manifest.toml");
-
-        try {
-          const manifestContent = await fs.readFile(mPath, "utf-8");
-
-          // Simple TOML parsing for [guards] and [remap] sections
-          const result: {
-            allowed: boolean;
-            reason?: string;
-            remap_to?: string;
-          } = { allowed: true };
-
-          // Extract deny list
-          const denyMatch = manifestContent.match(/\[guards\][\s\S]*?deny\s*=\s*\[([\s\S]*?)\]/);
-          if (denyMatch) {
-            const denyList = denyMatch[1]
-              .split(",")
-              .map(s => s.trim().replace(/^["']|["']$/g, ""))
-              .filter(Boolean);
-
-            for (const denied of denyList) {
-              if (checkCommand === denied || checkCommand.startsWith(denied + " ")) {
-                result.allowed = false;
-                result.reason = `Command "${checkCommand}" matches guard deny rule: "${denied}"`;
-
-                // Check for remap
-                const remapSection = manifestContent.match(/\[remap\]([\s\S]*?)(?:\n\[|$)/);
-                if (remapSection) {
-                  const remapRegex = new RegExp(`"${checkCommand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\s*=\\s*"([^"]+)"`);
-                  const remapMatch = remapSection[1].match(remapRegex);
-                  if (remapMatch) {
-                    result.remap_to = remapMatch[1];
-                  }
-                }
-                break;
-              }
-            }
-          }
-
-          // Check deny_with_message
-          const denyMsgSection = manifestContent.match(/\[guards\.deny_with_message\]([\s\S]*?)(?:\n\[|$)/);
-          if (denyMsgSection && result.allowed) {
-            const lines = denyMsgSection[1].split("\n");
-            for (const line of lines) {
-              const match = line.match(/^"([^"]+)"\s*=\s*"([^"]+)"/);
-              if (match) {
-                const [, cmd, msg] = match;
-                if (checkCommand === cmd || checkCommand.startsWith(cmd + " ")) {
-                  result.allowed = false;
-                  result.reason = msg;
-                  break;
-                }
-              }
-            }
-          }
-
-          return {
-            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          };
-        } catch {
-          throw new Error(`manifest.toml not found at: ${mPath}`);
-        }
       }
 
       default:
