@@ -254,6 +254,34 @@ class ProcessManager:
 
         return runner.tools
 
+    def list_cached_tools(self, mode: Optional[str] = None) -> list[dict[str, Any]]:
+        """
+        Get tools from already-running servers (non-blocking).
+        Does NOT start servers — only returns tools from ready runners.
+        """
+        if mode == "all":
+            servers = self.get_enabled_servers()
+        elif mode == "cold":
+            servers = self.get_cold_servers()
+        else:
+            servers = self.get_hot_servers()
+
+        all_tools = []
+        for name in servers:
+            runner = self._runners.get(name)
+            if not runner or not runner.is_ready:
+                continue
+            config = self._server_configs.get(name)
+            if not config or not config.enabled:
+                continue
+            for tool in runner.tools:
+                tool_name = tool.get("name", "")
+                if tool_name:
+                    self._tool_to_server[tool_name] = name
+            all_tools.extend(runner.tools)
+
+        return all_tools
+
     async def list_prompts(
         self,
         server_name: Optional[str] = None,
