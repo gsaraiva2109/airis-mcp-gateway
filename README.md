@@ -20,6 +20,21 @@ claude mcp add --scope user --transport sse airis-mcp-gateway http://localhost:9
 
 Done! You now have access to 60+ tools via **Dynamic MCP** - a token-efficient way to access all tools.
 
+### Recommended Companion Plugins
+
+The Gateway handles API/service integrations. For host-dependent capabilities, install these plugins in Claude Code:
+
+```bash
+# In Claude Code, run /plugin to install:
+superpowers          # TDD, debugging, planning workflows (by obra)
+claude-api           # File generation: docx, xlsx, pptx, pdf (by Anthropic)
+
+# Browser automation (standalone skill):
+playwright-cli install --skills
+```
+
+> These 3 + the Gateway cover virtually all development needs. See [Gateway vs Plugins](#mcp-gateway-vs-claude-code-plugins) for details.
+
 ## Dynamic MCP (Default)
 
 Instead of exposing all 60+ tools directly (which bloats context), Dynamic MCP exposes 7 meta-tools:
@@ -100,7 +115,7 @@ DYNAMIC_MCP=false docker compose up -d
 | **sequential-thinking** | npx | COLD | Step-by-step reasoning |
 | **serena** | mcp-remote | COLD | Semantic code retrieval and editing |
 | **tavily** | npx | COLD | Web search via Tavily API |
-| **playwright** | npx | COLD | Browser automation |
+| ~~**playwright**~~ | — | — | Removed: use `playwright-cli` skill instead |
 | **magic** | npx | COLD | UI component generation |
 | **morphllm** | npx | COLD | Code editing with warpgrep |
 | **chrome-devtools** | npx | COLD | Chrome debugging |
@@ -152,7 +167,6 @@ Claude Code / Cursor / Zed
 │  │  ├─ context7 (npx)          COLD                │    │
 │  │  ├─ serena (mcp-remote)     COLD                │    │
 │  │  ├─ tavily (npx)            COLD                │    │
-│  │  ├─ playwright (npx)        COLD                │    │
 │  │  ├─ supabase (npx)          COLD                │    │
 │  │  ├─ stripe (npx)            COLD                │    │
 │  │  └─ ... (20+ more servers)                      │    │
@@ -212,11 +226,11 @@ Fine-tune idle timeout behavior per server in `mcp-config.json`:
 ```json
 {
   "mcpServers": {
-    "playwright": {
+    "tavily": {
       "command": "npx",
-      "args": ["-y", "@anthropic/mcp-playwright"],
+      "args": ["-y", "mcp-remote", "https://mcp.tavily.com/mcp/?tavilyApiKey=${TAVILY_API_KEY}"],
       "enabled": true,
-      "mode": "hot",
+      "mode": "cold",
       "idle_timeout": 900,
       "min_ttl": 300,
       "max_ttl": 1800
@@ -475,6 +489,51 @@ curl http://localhost:9400/api/tools/status | jq '.servers[] | {name, status}'
   }
 }
 ```
+
+## MCP Gateway vs Claude Code Plugins
+
+Claude Code has a built-in plugin system (skills, hooks, MCP servers). Here's when to use the Gateway instead:
+
+### Gateway wins: Infrastructure & API services
+
+| Service | Plugin | Gateway | Winner |
+|---------|--------|---------|--------|
+| Supabase | MCP plugin | `supabase` (cold) | **Gateway** — Docker-isolated, one config |
+| Stripe | MCP plugin | `stripe` (cold) | **Gateway** — same reason |
+| GitHub | MCP plugin | `github` (cold) | **Gateway** — or just use `gh` CLI |
+| Slack | MCP plugin | Add to config | **Gateway** — when needed |
+| Context7 | MCP plugin | `context7` (hot) | **Gateway** — 700 tokens, negligible overhead |
+| Playwright | MCP plugin | ~~`playwright`~~ | **Neither** — use `playwright-cli` skill (host Chrome, no Docker needed) |
+
+**Why Gateway wins for services:**
+- **Docker-isolated** — no host pollution, consistent across machines
+- **HOT/COLD control** — plugins are always-on or always-off; Gateway has fine-grained lifecycle management
+- **One config file** — `mcp-config.json` manages everything vs scattered plugin installations
+- **Token efficient** — Dynamic MCP exposes 7 meta-tools instead of 60+; plugins load metadata (~100 words each) into every conversation
+
+### Plugins win: Host-dependent & workflow tools
+
+| Tool | Why Plugin |
+|------|-----------|
+| `playwright-cli` | Needs host Chrome browser — can't run inside Docker |
+| `superpowers` | Workflow skills (TDD, debugging, planning) — no MCP equivalent |
+| `claude-api` | File generation (docx/xlsx/pptx/pdf) — host filesystem access needed |
+
+### Recommended setup
+
+Keep plugins to **4-6 max** (each adds ~100 words of always-loaded metadata):
+
+```
+Plugins (host-dependent):     MCP Gateway (Docker-isolated):
+├── claude-api (files)        ├── context7 (HOT)
+├── superpowers (workflow)    ├── tavily (cold)
+└── playwright-cli (browser)  ├── supabase (cold)
+                              ├── stripe (cold)
+                              ├── cloudflare (cold)
+                              └── ... (20+ more, zero cost when cold)
+```
+
+> **Rule of thumb:** If it's an API/service → Gateway. If it needs host access or is a workflow pattern → Plugin.
 
 ## Ecosystem
 

@@ -186,22 +186,9 @@
         {"name": "describe_table", "description": "Get schema details for a specific table"}
       ]
     },
-    "playwright": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@playwright/mcp@latest"
-      ],
-      "env": {},
-      "enabled": true,
-      "mode": "cold",
-      "tools_index": [
-        {"name": "browser_navigate", "description": "Navigate to a URL in the browser"},
-        {"name": "browser_screenshot", "description": "Take a screenshot of the current page"},
-        {"name": "browser_click", "description": "Click an element on the page"},
-        {"name": "browser_type", "description": "Type text into an input field"},
-        {"name": "browser_wait_for_page_load", "description": "Wait for the page to finish loading"}
-      ]
+    "_playwright_removed": {
+      "_comment": "Removed: @playwright/mcp doesn't work in Docker (no Chrome). Use playwright-cli skill instead: `playwright-cli install --skills`",
+      "enabled": false
     },
     "magic": {
       "command": "npx",

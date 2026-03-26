@@ -272,10 +272,84 @@ Built-in commands in `.claude/commands/`:
 
 ## Screenshot Verification
 
-- `browser-use` スキル禁止。ホスト側でブラウザプロセスを起動するな
-- スクリーンショット検証は Playwright headless を Docker コンテナ内で実行すること
-- Playwright 入りの Docker イメージを用意し、コンテナ内で `page.screenshot()` して画像をアーティファクトとして保存
-- ホストのプロセステーブルを汚すな
+- `playwright-cli` スキルを使用（ホストの Chrome をヘッドレスで使用）
+- `playwright-cli open <url>` → `playwright-cli screenshot` の流れ
+- MCP Gateway の Playwright は使用しない（Docker 内に Chrome がないため）
+- snapshot（YAML）はスクリーンショットよりトークン効率が良い。視覚確認が不要なら `playwright-cli snapshot` を優先
+
+## Tool Routing Guide
+
+When working with a project that uses airis-mcp-gateway, follow this decision flow to pick the right tool.
+
+### Decision Flow
+
+```
+User request received
+  │
+  ├─ Need official library docs? → context7 (MCP Gateway HOT)
+  │    airis-exec context7:resolve-library-id → context7:query-docs
+  │
+  ├─ Need current/external info? → tavily (MCP Gateway cold)
+  │    airis-exec tavily:tavily-search
+  │
+  ├─ Database query or schema? → supabase (MCP Gateway cold)
+  │    airis-exec supabase:query
+  │
+  ├─ Payment/billing? → stripe (MCP Gateway cold)
+  │    airis-exec stripe:*
+  │
+  ├─ Browser testing/screenshots? → playwright-cli (host skill)
+  │    playwright-cli open → snapshot → screenshot
+  │    NOT MCP playwright (no Chrome in Docker)
+  │
+  ├─ File generation (docx/xlsx/pptx/pdf)? → claude-api plugin
+  │    Skill tool invocation
+  │
+  ├─ TDD/debugging/planning workflow? → superpowers plugin
+  │    Skill tool invocation
+  │
+  └─ Simple code read/edit/search? → Native tools (Read, Edit, Grep, Glob)
+      No MCP needed
+```
+
+### When to use MCP Gateway vs Native Tools
+
+| Complexity | Approach |
+|-----------|---------|
+| Simple (1-2 files, known location) | Native: Read, Edit, Grep, Glob |
+| Medium (new library, need docs) | context7 for docs, then native tools |
+| Complex (multi-service, research) | airis-route for optimal tool chain |
+
+### Auto-Activation Triggers
+
+| Request pattern | Gateway server |
+|----------------|---------------|
+| Library imports, API patterns, "how to use X" | `context7` |
+| "search", "latest", "current", research | `tavily` |
+| Database, SQL, schema, migration | `supabase` |
+| Payment, invoice, subscription | `stripe` |
+| DNS, workers, KV | `cloudflare` |
+| Figma, design file | `figma` |
+
+### What NOT to route through Gateway
+
+- **Browser automation** → `playwright-cli` skill (needs host Chrome)
+- **File generation** (docx/xlsx/pdf) → `claude-api` plugin (needs host filesystem)
+- **Workflow patterns** (TDD, debugging) → `superpowers` plugin (no MCP equivalent)
+- **Git operations** → `gh` CLI or native git (more reliable than MCP)
+
+### Recommended Companion Plugins
+
+These plugins complement the Gateway for capabilities that can't run inside Docker:
+
+```bash
+# Install via /plugin in Claude Code
+superpowers          # TDD, debugging, planning workflows
+claude-api           # File generation (docx/xlsx/pptx/pdf)
+playwright-cli       # Browser automation (install: playwright-cli install --skills)
+```
+
+Keep total plugins to 4-6 max. Everything else goes through the Gateway.
 
 ## CI/CD
 

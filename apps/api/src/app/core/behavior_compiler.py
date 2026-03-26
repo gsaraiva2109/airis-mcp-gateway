@@ -40,6 +40,19 @@ _META_TOOLS_SECTION = (
     "ALWAYS start with airis-find or airis-suggest to discover available tools."
 )
 
+_TOOL_ROUTING_GUIDE = (
+    "## Tool Routing Guide\n"
+    "Use Gateway (airis-exec) for API/service calls. Use host tools for everything else.\n\n"
+    "Gateway (airis-exec): library docs → context7 | web search → tavily | "
+    "database → supabase | payments → stripe | DNS/workers → cloudflare | design files → figma\n\n"
+    "Host tools (NOT Gateway): browser automation → playwright-cli skill (needs host Chrome) | "
+    "file generation (docx/xlsx/pdf) → claude-api plugin | "
+    "TDD/debugging/planning → superpowers plugin | "
+    "git operations → gh CLI or native git | "
+    "simple code read/edit → native Read/Edit/Grep tools\n\n"
+    "Rule: API/service → Gateway. Host-dependent → plugin/skill/CLI. Simple file ops → native tools."
+)
+
 
 def compile_instructions(server_configs: dict[str, McpServerConfig]) -> str:
     """Compile behavior specs from server configs into instructions string.
@@ -50,7 +63,7 @@ def compile_instructions(server_configs: dict[str, McpServerConfig]) -> str:
     Returns:
         Compiled instructions string for MCP initialize response
     """
-    sections = [_BASE_INSTRUCTIONS, _META_TOOLS_SECTION]
+    sections = [_BASE_INSTRUCTIONS, _META_TOOLS_SECTION, _TOOL_ROUTING_GUIDE]
 
     # Collect behaviors from all servers (including disabled — they can be auto-enabled)
     behavior_lines = _compile_behavior_lines(server_configs)
