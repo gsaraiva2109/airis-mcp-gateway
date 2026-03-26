@@ -713,6 +713,7 @@ class TestApplySchemaPartitioningDynamicMode:
 
         # Mock process manager
         mock_pm = MagicMock()
+        mock_pm.get_hot_servers = MagicMock(return_value=["test-hot-server"])
         mock_pm.list_tools = AsyncMock(return_value=[
             {"name": "hot_tool_1", "description": "HOT tool", "inputSchema": {}},
         ])
