@@ -184,7 +184,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "airis_config_remove_server",
-        description: "Remove an MCP server from the gateway configuration permanently. This deletes the server entry from mcp-config.json. Use airis_config_set_enabled with enabled=false to disable without removing.",
+        description: "Remove an MCP server from the gateway configuration permanently. This deletes the server entry from mcp-config.json. To disable without removing, edit mcp-config.json and set enabled=false.",
         inputSchema: {
           type: "object",
           properties: {

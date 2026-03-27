@@ -65,11 +65,34 @@ tools/list → 7 tools × ~200 tokens each = ~1,400 tokens (97% reduction)
 └─────────────────────────────────────────────────────────┘
 ```
 
-## Tool Discovery Flow
+## Tool Calling Flow
 
-### 1. airis-find
+### One-Call Execution (Default)
 
-Search for tools and servers:
+`airis-exec` embeds a compact tool listing in its description, so LLMs already know every available tool:
+
+```
+airis-exec description includes:
+  Available tools:
+  [memory] create_entities, search_nodes, add_observations
+  [stripe] create_customer, create_payment_intent, ...
+  [tavily] tavily-search, tavily-extract
+```
+
+The LLM can call any tool directly without a discovery step:
+
+```
+LLM: airis-exec tool="stripe:create_customer" arguments={"email": "user@example.com"}
+
+Response:
+{ "id": "cus_xxx", "email": "user@example.com", ... }
+```
+
+If arguments are wrong, the full schema is returned automatically — the LLM retries with correct arguments on the next call. **Worst case: 2 calls.**
+
+### Fallback: airis-find
+
+For tools not listed in `airis-exec` (e.g., after a server is newly added or disabled):
 
 ```
 LLM: airis-find query="stripe"
@@ -85,9 +108,9 @@ Found 2 tools across 24 servers
 - **stripe:create_payment_intent** - Create payment intent
 ```
 
-### 2. airis-schema
+### Fallback: airis-schema
 
-Get full input schema before execution:
+When a tool has complex arguments and you want to check before calling:
 
 ```
 LLM: airis-schema tool="stripe:create_customer"
@@ -110,17 +133,6 @@ Response:
 }
 ```
 
-### 3. airis-exec
-
-Execute the tool:
-
-```
-LLM: airis-exec tool="stripe:create_customer" arguments={"email": "user@example.com"}
-
-Response:
-{ "id": "cus_xxx", "email": "user@example.com", ... }
-```
-
 ## Auto-Enable Feature
 
 Disabled servers are discoverable but not running. When `airis-exec` is called:
@@ -130,14 +142,12 @@ Disabled servers are discoverable but not running. When `airis-exec` is called:
 3. **Tool is executed** - Seamlessly
 
 ```
-LLM: airis-find query="github"
-→ github (cold, disabled): 30 tools
-
 LLM: airis-exec tool="github:create_issue" arguments={...}
-→ [Server auto-enabled]
-→ [Tools loaded]
+→ [Server auto-enabled → Tools loaded → Executed]
 → { "id": 123, "title": "...", ... }
 ```
+
+Even disabled servers work in one call — no need to find or enable them first.
 
 ## Server Modes
 
@@ -214,13 +224,14 @@ DYNAMIC_MCP=false docker compose up -d
 | Aspect | Traditional MCP | Dynamic MCP |
 |--------|-----------------|-------------|
 | Context usage | ~42,000 tokens | ~1,400 tokens |
-| Tool discovery | Implicit (all in context) | Explicit (airis-find) |
+| Tool discovery | Implicit (all in context) | Embedded in airis-exec description |
 | Server management | Manual enable/disable | Auto-enable on use |
 | Cold start | User waits | Happens during airis-exec |
 
 ## Best Practices
 
-1. **Use airis-find first** - Discover what's available
-2. **Use airis-schema for complex tools** - Understand required arguments
-3. **Let airis-exec auto-enable** - Don't manually manage servers
-4. **Keep rarely-used servers disabled** - Resource efficiency
+1. **Call airis-exec directly** - Tool listing is embedded in the description, no discovery step needed
+2. **Use airis-schema for complex tools** - When arguments are unclear, check before calling
+3. **Use airis-find as fallback** - Only when the tool you need isn't listed in airis-exec
+4. **Let airis-exec auto-enable** - Don't manually manage servers
+5. **Keep rarely-used servers disabled** - Resource efficiency

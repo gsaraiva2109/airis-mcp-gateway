@@ -52,6 +52,7 @@ class ProcessConfig:
     env: dict[str, str] = field(default_factory=dict)
     cwd: Optional[str] = None
     idle_timeout: int = 120  # seconds (base, can be overridden by adaptive TTL)
+    mode: str = "cold"  # "hot" or "cold" — HOT servers skip idle-kill
     # Adaptive TTL settings
     adaptive_ttl_enabled: bool = True
     min_ttl: int = 30  # minimum TTL in seconds
@@ -688,7 +689,9 @@ class ProcessRunner:
                 logger.error(f"{self.config.name} stderr reader error: {e}")
 
     async def _idle_reaper(self):
-        """Kill process after idle timeout (uses adaptive TTL)."""
+        """Kill process after idle timeout (uses adaptive TTL). HOT servers are exempt."""
+        if self.config.mode == "hot":
+            return
         while self._state not in (ProcessState.STOPPING, ProcessState.STOPPED):
             await asyncio.sleep(5)
 

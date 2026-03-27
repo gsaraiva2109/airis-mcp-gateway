@@ -160,104 +160,8 @@ describe("Config Read/Write", () => {
   });
 });
 
-describe("airis_config_get tool", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("should return full config when no server specified", async () => {
-    const mockConfig: McpConfig = {
-      mcpServers: {
-        memory: { command: "npx", args: [], env: {}, enabled: true },
-        fetch: { command: "uvx", args: [], env: {}, enabled: false },
-      },
-    };
-
-    vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(mockConfig));
-
-    const config = await readConfig();
-
-    expect(Object.keys(config.mcpServers)).toHaveLength(2);
-    expect(config.mcpServers.memory.enabled).toBe(true);
-    expect(config.mcpServers.fetch.enabled).toBe(false);
-  });
-
-  it("should return single server config when specified", async () => {
-    const mockConfig: McpConfig = {
-      mcpServers: {
-        memory: { command: "npx", args: [], env: {}, enabled: true },
-      },
-    };
-
-    vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(mockConfig));
-
-    const config = await readConfig();
-    const serverName = "memory";
-    const serverConfig = config.mcpServers[serverName];
-
-    expect(serverConfig).toBeDefined();
-    expect(serverConfig.enabled).toBe(true);
-  });
-
-  it("should throw error for non-existent server", async () => {
-    const mockConfig: McpConfig = {
-      mcpServers: {},
-    };
-
-    vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(mockConfig));
-
-    const config = await readConfig();
-    const serverName = "nonexistent";
-
-    expect(config.mcpServers[serverName]).toBeUndefined();
-  });
-});
-
-describe("airis_config_set_enabled tool", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("should enable a disabled server", async () => {
-    const mockConfig: McpConfig = {
-      mcpServers: {
-        memory: { command: "npx", args: [], env: {}, enabled: false },
-      },
-    };
-
-    vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(mockConfig));
-    vi.mocked(fs.writeFile).mockResolvedValue(undefined);
-
-    const config = await readConfig();
-    config.mcpServers.memory.enabled = true;
-    await writeConfig(config);
-
-    expect(fs.writeFile).toHaveBeenCalledWith(
-      CONFIG_PATH,
-      expect.stringContaining('"enabled": true')
-    );
-  });
-
-  it("should disable an enabled server", async () => {
-    const mockConfig: McpConfig = {
-      mcpServers: {
-        memory: { command: "npx", args: [], env: {}, enabled: true },
-      },
-    };
-
-    vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(mockConfig));
-    vi.mocked(fs.writeFile).mockResolvedValue(undefined);
-
-    const config = await readConfig();
-    config.mcpServers.memory.enabled = false;
-    await writeConfig(config);
-
-    expect(fs.writeFile).toHaveBeenCalledWith(
-      CONFIG_PATH,
-      expect.stringContaining('"enabled": false')
-    );
-  });
-});
+// airis_config_get and airis_config_set_enabled were removed.
+// Config reading/writing is covered by the "Config Read/Write" tests above.
 
 describe("airis_config_add_server tool", () => {
   beforeEach(() => {
@@ -417,133 +321,8 @@ describe("Profile Management", () => {
   });
 });
 
-describe("airis_quick_enable tool", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("should enable multiple servers at once", async () => {
-    const mockConfig: McpConfig = {
-      mcpServers: {
-        memory: { command: "npx", args: [], env: {}, enabled: false },
-        fetch: { command: "uvx", args: [], env: {}, enabled: false },
-        context7: { command: "npx", args: [], env: {}, enabled: false },
-      },
-    };
-
-    vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(mockConfig));
-    vi.mocked(fs.writeFile).mockResolvedValue(undefined);
-
-    const config = await readConfig();
-    const servers = ["memory", "fetch"];
-    const enabled: string[] = [];
-    const notFound: string[] = [];
-
-    for (const serverName of servers) {
-      if (config.mcpServers[serverName]) {
-        config.mcpServers[serverName].enabled = true;
-        enabled.push(serverName);
-      } else {
-        notFound.push(serverName);
-      }
-    }
-
-    await writeConfig(config);
-
-    expect(enabled).toEqual(["memory", "fetch"]);
-    expect(notFound).toEqual([]);
-    expect(config.mcpServers.memory.enabled).toBe(true);
-    expect(config.mcpServers.fetch.enabled).toBe(true);
-    expect(config.mcpServers.context7.enabled).toBe(false);
-  });
-
-  it("should report not found servers", async () => {
-    const mockConfig: McpConfig = {
-      mcpServers: {
-        memory: { command: "npx", args: [], env: {}, enabled: false },
-      },
-    };
-
-    vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(mockConfig));
-
-    const config = await readConfig();
-    const servers = ["memory", "nonexistent"];
-    const enabled: string[] = [];
-    const notFound: string[] = [];
-
-    for (const serverName of servers) {
-      if (config.mcpServers[serverName]) {
-        config.mcpServers[serverName].enabled = true;
-        enabled.push(serverName);
-      } else {
-        notFound.push(serverName);
-      }
-    }
-
-    expect(enabled).toEqual(["memory"]);
-    expect(notFound).toEqual(["nonexistent"]);
-  });
-});
-
-describe("airis_quick_disable_all tool", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("should disable all servers", async () => {
-    const mockConfig: McpConfig = {
-      mcpServers: {
-        memory: { command: "npx", args: [], env: {}, enabled: true },
-        fetch: { command: "uvx", args: [], env: {}, enabled: true },
-      },
-    };
-
-    vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(mockConfig));
-    vi.mocked(fs.writeFile).mockResolvedValue(undefined);
-
-    const config = await readConfig();
-    const except: string[] = [];
-
-    for (const [serverName, serverConfig] of Object.entries(config.mcpServers)) {
-      if (!except.includes(serverName)) {
-        serverConfig.enabled = false;
-      }
-    }
-
-    await writeConfig(config);
-
-    expect(config.mcpServers.memory.enabled).toBe(false);
-    expect(config.mcpServers.fetch.enabled).toBe(false);
-  });
-
-  it("should keep excepted servers enabled", async () => {
-    const mockConfig: McpConfig = {
-      mcpServers: {
-        memory: { command: "npx", args: [], env: {}, enabled: true },
-        fetch: { command: "uvx", args: [], env: {}, enabled: true },
-        context7: { command: "npx", args: [], env: {}, enabled: true },
-      },
-    };
-
-    vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(mockConfig));
-    vi.mocked(fs.writeFile).mockResolvedValue(undefined);
-
-    const config = await readConfig();
-    const except = ["memory"];
-
-    for (const [serverName, serverConfig] of Object.entries(config.mcpServers)) {
-      if (!except.includes(serverName)) {
-        serverConfig.enabled = false;
-      }
-    }
-
-    await writeConfig(config);
-
-    expect(config.mcpServers.memory.enabled).toBe(true);
-    expect(config.mcpServers.fetch.enabled).toBe(false);
-    expect(config.mcpServers.context7.enabled).toBe(false);
-  });
-});
+// airis_quick_enable and airis_quick_disable_all were removed.
+// Server enable/disable is handled by airis-exec auto-enable.
 
 describe("airis_mcp_detect tool", () => {
   beforeEach(() => {
@@ -739,15 +518,11 @@ describe("Error handling", () => {
   it("should handle unknown tool names", () => {
     const toolName = "unknown_tool";
     const knownTools = [
-      "airis_config_get",
-      "airis_config_set_enabled",
       "airis_config_add_server",
       "airis_config_remove_server",
       "airis_profile_save",
       "airis_profile_load",
       "airis_profile_list",
-      "airis_quick_enable",
-      "airis_quick_disable_all",
       "airis_mcp_detect",
     ];
 

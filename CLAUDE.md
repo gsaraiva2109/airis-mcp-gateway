@@ -258,7 +258,7 @@ The gateway automatically injects `instructions` into the MCP `initialize` respo
 "instructions": "This is AIRIS MCP Gateway with Dynamic MCP. IMPORTANT: Do NOT call tools directly..."
 ```
 
-This is implemented in `mcp_proxy.py:405-423` and ensures LLMs always know to use `airis-find` → `airis-schema` → `airis-exec` pattern.
+This is implemented in `behavior_compiler.py:24-31`. The instructions direct LLMs to use `airis-exec` directly (tool listing is embedded in its description), with `airis-find` as fallback for unlisted tools.
 
 ## Claude Code Slash Commands
 

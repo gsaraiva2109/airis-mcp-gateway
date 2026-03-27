@@ -43,27 +43,34 @@ That's it. 60+ tools are now available through 7 token-efficient meta-tools.
 
 ## How It Works
 
-Dynamic MCP exposes 7 meta-tools instead of 60+:
+Dynamic MCP exposes 7 meta-tools instead of 60+. The key innovation: **`airis-exec` embeds a compact tool listing in its description**, so LLMs already know every available tool and can call them directly — no discovery step needed.
 
 | Meta-Tool | Description |
 |-----------|-------------|
-| `airis-find` | Search for tools by name, description, or server |
-| `airis-exec` | Execute any tool by `server:tool_name` |
-| `airis-schema` | Get full input schema for a tool |
+| `airis-exec` | **Execute any tool in one call.** Tool listing embedded in description. |
+| `airis-find` | Search for tools not listed in airis-exec (fallback) |
+| `airis-schema` | Get full input schema (when arguments are unclear) |
 | `airis-confidence` | Pre-implementation confidence check |
 | `airis-repo-index` | Generate repository structure overview |
 | `airis-suggest` | Tool recommendations from natural language |
 | `airis-route` | Route task to optimal tool chain |
 
+### One-Call Workflow
+
 ```
 User: "Save this note about the meeting"
 
-Claude: [calls airis-find query="memory"]
-→ memory:create_entities, memory:search_entities, ...
+Claude sees airis-exec description:
+  Available tools:
+  [memory] create_entities, search_nodes, add_observations, ...
+  [tavily] tavily-search, tavily-extract
+  [stripe] create_customer, create_payment_intent, ...
 
 Claude: [calls airis-exec tool="memory:create_entities" arguments={...}]
-→ Done!
+→ Done! (1 call)
 ```
+
+No `airis-find` needed — the LLM already knows what tools exist. If arguments are wrong, the schema is returned automatically so the next call succeeds.
 
 ```
 Traditional: 60+ tools × ~700 tokens = ~42,000 tokens

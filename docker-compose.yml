@@ -118,7 +118,7 @@ services:
     healthcheck:
       # Use /ready instead of /health to ensure HOT servers are initialized
       # before accepting connections (fixes Claude Code slash command visibility)
-      test: ["CMD-SHELL", "curl -sf http://localhost:8000/ready | grep -q '\"ready\": true' || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/ready | grep -q '\"ready\":true' || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 10
