@@ -24,10 +24,9 @@ _PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 _BASE_INSTRUCTIONS = (
     "This is AIRIS MCP Gateway with Dynamic MCP. "
     "IMPORTANT: Do NOT call tools directly. Instead:\n"
-    "1. Use 'airis-find' to search for tools by name/description\n"
-    "2. Use 'airis-schema' to get the input schema for a tool\n"
-    "3. Use 'airis-exec' to execute the tool\n"
-    "All 60+ tools are accessed through these 3 meta-tools. "
+    "1. Use 'airis-exec' to execute any tool — all available tool names are listed in its description\n"
+    "2. If arguments are wrong, the schema will be returned automatically\n"
+    "All 60+ tools are accessed through airis-exec. "
     "This provides 98% token reduction while maintaining full functionality."
 )
 
@@ -36,8 +35,8 @@ _META_TOOLS_SECTION = (
     "- 'airis-confidence': Pre-implementation confidence check. Use before starting complex tasks.\n"
     "- 'airis-repo-index': Generate repository structure overview for unfamiliar codebases.\n"
     "- 'airis-suggest': Get tool recommendations from natural language intent.\n\n"
-    "When you need a capability (web search, memory, code analysis, etc.), "
-    "ALWAYS start with airis-find or airis-suggest to discover available tools."
+    "When you need a capability, check airis-exec's description for available tools, "
+    "or use airis-find to search by keyword."
 )
 
 _TOOL_ROUTING_GUIDE = (

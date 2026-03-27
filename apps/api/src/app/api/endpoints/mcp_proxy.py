@@ -582,15 +582,15 @@ async def apply_schema_partitioning(data: Dict[str, Any]) -> Dict[str, Any]:
     process_manager = get_process_manager()
 
     # Dynamic MCP mode: meta-tools + HOT server tools with full schema
-    # COLD servers are still accessed via airis-find → airis-exec
+    # COLD servers are accessed directly via airis-exec (tool names listed in description)
     if settings.DYNAMIC_MCP:
         dynamic_mcp = get_dynamic_mcp()
-        tools = list(dynamic_mcp.get_meta_tools())
-        meta_count = len(tools)
+        excluded_servers = {"airis-mcp-gateway-control", "airis-commands"}
 
         # HOT servers: expose full schema directly (skip internal management servers)
         # Uses asyncio.gather for parallel startup, with per-server timeout
-        excluded_servers = {"airis-mcp-gateway-control", "airis-commands"}
+        hot_tool_names: set[str] = set()
+        hot_tools_list: list[dict] = []
         try:
             hot_servers = [
                 s for s in process_manager.get_hot_servers()
@@ -614,13 +614,26 @@ async def apply_schema_partitioning(data: Dict[str, Any]) -> Dict[str, Any]:
                 *[get_tools_for_server(s) for s in hot_servers]
             )
             for server_tools in results:
-                tools.extend(server_tools)
+                for t in server_tools:
+                    hot_tool_names.add(t.get("name", ""))
+                hot_tools_list.extend(server_tools)
         except Exception as e:
             logger.error(f"Failed to list HOT tools: {e}")
 
+        # Build tool listing for airis-exec description (excludes HOT tools to avoid duplication)
+        tool_listing = dynamic_mcp.build_tool_listing(
+            excluded_servers=excluded_servers,
+            hot_exposed_tools=hot_tool_names,
+            process_manager=process_manager,
+        )
+
+        tools = list(dynamic_mcp.get_meta_tools(tool_listing=tool_listing))
+        meta_count = len(tools)
+        tools.extend(hot_tools_list)
+
         data["result"]["tools"] = tools
         hot_count = len(tools) - meta_count
-        logger.info(f"Returning {len(tools)} tools ({meta_count} meta + {hot_count} HOT)")
+        logger.info(f"Returning {len(tools)} tools ({meta_count} meta + {hot_count} HOT, listing={len(tool_listing)} chars)")
 
         # Schedule background cache refresh (non-blocking)
         asyncio.create_task(_refresh_dynamic_mcp_cache(process_manager, docker_tools))
@@ -1583,7 +1596,28 @@ async def handle_airis_exec(rpc_request: Dict[str, Any], session_id: Optional[st
                 "id": rpc_request.get("id"),
             }
             if "error" in result:
-                response_data["error"] = result["error"]
+                error_msg = result["error"].get("message", "")
+                # Attach schema hint so LLM can retry with correct arguments
+                schema_hint = None
+                tool_info = dynamic_mcp._tools.get(tool_name)
+                if tool_info and tool_info.input_schema:
+                    schema_hint = tool_info.input_schema
+                elif not tool_info:
+                    await dynamic_mcp.load_tools_for_server(server_name, process_manager)
+                    tool_info = dynamic_mcp._tools.get(tool_name)
+                    if tool_info and tool_info.input_schema:
+                        schema_hint = tool_info.input_schema
+
+                if schema_hint:
+                    response_data["result"] = {
+                        "content": [{
+                            "type": "text",
+                            "text": f"Error: {error_msg}\n\nExpected schema:\n{json.dumps(schema_hint, indent=2)}"
+                        }],
+                        "isError": True
+                    }
+                else:
+                    response_data["error"] = result["error"]
             else:
                 response_data["result"] = result.get("result")
 

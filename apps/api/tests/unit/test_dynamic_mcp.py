@@ -720,6 +720,7 @@ class TestApplySchemaPartitioningDynamicMode:
 
         # Mock dynamic_mcp
         mock_dynamic_mcp = MagicMock()
+        mock_dynamic_mcp.build_tool_listing.return_value = "[test-server] test_tool_1, test_tool_2"
         mock_dynamic_mcp.get_meta_tools.return_value = [
             {"name": "airis-find", "description": "Find tools", "inputSchema": {"type": "object"}},
             {"name": "airis-exec", "description": "Execute tool", "inputSchema": {"type": "object"}},
@@ -810,3 +811,109 @@ class TestApplySchemaPartitioningDynamicMode:
 
         # Total: 1 docker + 2 HOT + 1 expandSchema = 4 tools
         assert len(tools) == 4
+
+
+class TestBuildToolListing:
+    """Tests for DynamicMCP.build_tool_listing()."""
+
+    def _make_dynamic_mcp(self, tools: dict[str, tuple[str, str]] | None = None):
+        """Create DynamicMCP with pre-populated tools cache.
+
+        Args:
+            tools: dict of tool_name -> (server_name, description)
+        """
+        from app.core.dynamic_mcp import DynamicMCP, ToolInfo
+        dmc = DynamicMCP()
+        if tools:
+            for tool_name, (server, desc) in tools.items():
+                dmc._tools[tool_name] = ToolInfo(
+                    name=tool_name, server=server, description=desc, source="index"
+                )
+                dmc._tool_to_server[tool_name] = server
+        return dmc
+
+    def test_basic_listing(self):
+        """Should group tools by server in sorted order."""
+        dmc = self._make_dynamic_mcp({
+            "search": ("tavily", "Search web"),
+            "extract": ("tavily", "Extract content"),
+            "create_entities": ("memory", "Create entities"),
+        })
+        result = dmc.build_tool_listing()
+        assert result == (
+            "[memory] create_entities\n"
+            "[tavily] extract, search"
+        )
+
+    def test_excludes_servers(self):
+        """Should exclude specified servers."""
+        dmc = self._make_dynamic_mcp({
+            "search": ("tavily", "Search"),
+            "manage": ("airis-commands", "Manage"),
+        })
+        result = dmc.build_tool_listing(excluded_servers={"airis-commands"})
+        assert result == "[tavily] search"
+        assert "airis-commands" not in result
+
+    def test_excludes_hot_tools(self):
+        """Should exclude tools already exposed as HOT tools."""
+        dmc = self._make_dynamic_mcp({
+            "resolve-library-id": ("context7", "Resolve"),
+            "query-docs": ("context7", "Query docs"),
+            "search": ("tavily", "Search"),
+        })
+        result = dmc.build_tool_listing(
+            hot_exposed_tools={"resolve-library-id", "query-docs"}
+        )
+        assert result == "[tavily] search"
+        assert "context7" not in result
+
+    def test_empty_cache(self):
+        """Should return empty string when no tools are cached."""
+        dmc = self._make_dynamic_mcp()
+        result = dmc.build_tool_listing()
+        assert result == ""
+
+    def test_fallback_to_process_manager(self):
+        """Should use tools_index from process_manager when cache is empty."""
+        from unittest.mock import MagicMock
+        dmc = self._make_dynamic_mcp()  # empty cache
+
+        mock_pm = MagicMock()
+        mock_pm.get_server_names.return_value = ["memory", "internal"]
+        mock_config_memory = MagicMock()
+        mock_config_memory.tools_index = [
+            {"name": "create_entities", "description": "Create"},
+            {"name": "search_nodes", "description": "Search"},
+        ]
+        mock_config_internal = MagicMock()
+        mock_config_internal.tools_index = [{"name": "manage", "description": "Manage"}]
+        mock_pm._server_configs = {
+            "memory": mock_config_memory,
+            "internal": mock_config_internal,
+        }
+
+        result = dmc.build_tool_listing(
+            excluded_servers={"internal"},
+            process_manager=mock_pm,
+        )
+        assert result == "[memory] create_entities, search_nodes"
+
+    def test_get_meta_tools_with_listing(self):
+        """get_meta_tools should embed tool listing in airis-exec description."""
+        dmc = self._make_dynamic_mcp({
+            "search": ("tavily", "Search"),
+        })
+        listing = dmc.build_tool_listing()
+        tools = dmc.get_meta_tools(tool_listing=listing)
+        exec_tool = next(t for t in tools if t["name"] == "airis-exec")
+        assert "Available tools:" in exec_tool["description"]
+        assert "[tavily] search" in exec_tool["description"]
+
+    def test_get_meta_tools_without_listing(self):
+        """get_meta_tools without listing should have fallback description."""
+        dmc = self._make_dynamic_mcp()
+        tools = dmc.get_meta_tools()
+        exec_tool = next(t for t in tools if t["name"] == "airis-exec")
+        assert "Available tools:" not in exec_tool["description"]
+        assert "airis-find" in exec_tool["description"]

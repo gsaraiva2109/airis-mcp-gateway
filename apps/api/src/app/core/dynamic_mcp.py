@@ -251,6 +251,51 @@ class DynamicMCP:
 
         logger.info(f"Cached {len(self._tools)} tools ({index_count} from index) from {len(self._servers)} servers (COLD tools on-demand)")
 
+    def build_tool_listing(
+        self,
+        excluded_servers: set[str] | None = None,
+        hot_exposed_tools: set[str] | None = None,
+        process_manager=None,
+    ) -> str:
+        """Build compact tool listing grouped by server for airis-exec description.
+
+        Returns format like:
+            [memory] create_entities, search_nodes, add_observations
+            [tavily] tavily-search, tavily-extract
+        """
+        excluded = excluded_servers or set()
+        hot_tools = hot_exposed_tools or set()
+
+        # Group tools by server from cache
+        server_tools: dict[str, list[str]] = {}
+        for tool_name, tool_info in self._tools.items():
+            if tool_info.server in excluded:
+                continue
+            if tool_name in hot_tools:
+                continue
+            server_tools.setdefault(tool_info.server, []).append(tool_name)
+
+        # Fallback: if cache is empty, read tools_index from process_manager configs
+        if not server_tools and process_manager:
+            for name in process_manager.get_server_names():
+                if name in excluded:
+                    continue
+                config = process_manager._server_configs.get(name)
+                if config and config.tools_index:
+                    tools = [
+                        t.get("name") for t in config.tools_index
+                        if t.get("name") and t.get("name") not in hot_tools
+                    ]
+                    if tools:
+                        server_tools[name] = tools
+
+        lines = []
+        for server_name in sorted(server_tools.keys()):
+            tools = sorted(server_tools[server_name])
+            lines.append(f"[{server_name}] {', '.join(tools)}")
+
+        return "\n".join(lines)
+
     async def load_tools_for_server(
         self,
         server_name: str,
@@ -498,18 +543,36 @@ class DynamicMCP:
             return text
         return text[:max_length - 1] + "…"
 
-    def get_meta_tools(self) -> list[dict]:
+    def get_meta_tools(self, tool_listing: str = "") -> list[dict]:
         """
         Get the meta-tools for Dynamic MCP mode.
+
+        Args:
+            tool_listing: Compact tool listing to embed in airis-exec description.
+                If provided, airis-exec becomes self-sufficient (no find/schema needed).
 
         Returns:
             List of tool definitions for airis-find, airis-exec, airis-schema,
             airis-confidence, airis-repo-index, and airis-suggest
         """
+        # Build airis-exec description dynamically
+        if tool_listing:
+            exec_desc = (
+                "Execute any MCP tool by name. "
+                "Call with tool='server:tool_name' and arguments={...}. "
+                "If arguments are wrong, the tool schema will be returned.\n\n"
+                "Available tools:\n" + tool_listing
+            )
+        else:
+            exec_desc = (
+                "Execute any MCP tool by name. "
+                "Use airis-find to discover available tools."
+            )
+
         return [
             {
                 "name": "airis-find",
-                "description": "Search for available MCP tools and servers. Use this to discover what tools are available before calling airis-exec.",
+                "description": "Search for available MCP tools and servers by keyword. Use when the tool you need is not listed in airis-exec.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -526,17 +589,17 @@ class DynamicMCP:
             },
             {
                 "name": "airis-exec",
-                "description": "Execute any MCP tool by name. First use airis-find to discover available tools, then use this to execute them.",
+                "description": exec_desc,
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "tool": {
                             "type": "string",
-                            "description": "Tool name to execute. Can be 'tool_name' or 'server:tool_name' format. Use airis-find first to discover tool names."
+                            "description": "Tool name in 'server:tool_name' format"
                         },
                         "arguments": {
                             "type": "object",
-                            "description": "Arguments to pass to the tool. Use airis-find with the tool name to see required arguments."
+                            "description": "Arguments to pass to the tool"
                         }
                     },
                     "required": ["tool"]
@@ -544,7 +607,7 @@ class DynamicMCP:
             },
             {
                 "name": "airis-schema",
-                "description": "Get the full input schema for a specific tool. Use this before airis-exec to see required arguments.",
+                "description": "Get the full input schema for a specific tool. Use when you need to check required arguments before calling airis-exec.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
