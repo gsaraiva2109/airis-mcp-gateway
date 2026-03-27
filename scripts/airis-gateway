@@ -4,9 +4,8 @@ set -euo pipefail
 # AIRIS MCP Gateway - Thin CLI Wrapper
 # Just pulls latest and runs docker compose
 
-REPO="${AIRIS_MCP_REPO:-https://github.com/agiletec-inc/airis-mcp-gateway}"
 DIR="${AIRIS_MCP_DIR:-$HOME/.local/share/airis-mcp-gateway}"
-CONFIG_DIR="${AIRIS_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/airis-mcp-gateway}"
+BASE_URL="https://raw.githubusercontent.com/agiletec-inc/airis-mcp-gateway/${AIRIS_VERSION:-latest}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -17,41 +16,23 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-ensure_repo() {
+ensure_files() {
     mkdir -p "$DIR"
-    if [ -d "$DIR/.git" ]; then
-        log_info "Updating repository..."
-        git -C "$DIR" fetch --tags -q 2>/dev/null || true
-        local latest_tag=$(git -C "$DIR" describe --tags --abbrev=0 2>/dev/null || echo "main")
-        git -C "$DIR" checkout -q "$latest_tag" 2>/dev/null || true
-        git -C "$DIR" pull -q 2>/dev/null || true
-    else
-        log_info "Cloning repository..."
-        git clone -q "$REPO" "$DIR"
-        local latest_tag=$(git -C "$DIR" describe --tags --abbrev=0 2>/dev/null || echo "main")
-        git -C "$DIR" checkout -q "$latest_tag" 2>/dev/null || true
+    if [ ! -f "$DIR/docker-compose.yml" ]; then
+        log_info "Downloading docker-compose.yml..."
+        curl -fsSL "$BASE_URL/docker-compose.dist.yml" -o "$DIR/docker-compose.yml"
     fi
-}
-
-ensure_config() {
-    mkdir -p "$CONFIG_DIR"
-    if [ ! -f "$CONFIG_DIR/mcp-config.json" ]; then
-        if [ -f "$DIR/mcp-config.json" ]; then
-            log_info "Copying default config to $CONFIG_DIR/"
-            cp "$DIR/mcp-config.json" "$CONFIG_DIR/"
-        else
-            log_error "No mcp-config.json found!"
-            exit 1
-        fi
+    if [ ! -f "$DIR/mcp-config.json" ]; then
+        log_info "Downloading default config..."
+        curl -fsSL "$BASE_URL/mcp-config.json.example" -o "$DIR/mcp-config.json"
     fi
 }
 
 cmd_up() {
-    ensure_repo
-    ensure_config
+    ensure_files
     log_info "Starting AIRIS MCP Gateway..."
     cd "$DIR"
-    export AIRIS_CONFIG_DIR="$CONFIG_DIR"
+    docker compose pull -q 2>/dev/null || true
     docker compose up -d "$@"
     log_info "Gateway started!"
     echo ""
@@ -59,7 +40,7 @@ cmd_up() {
     echo "  Gateway: http://localhost:9390"
     echo ""
     echo "Register with Claude Code:"
-    echo "  claude mcp add --transport http airis-mcp-gateway http://localhost:9400/api/v1/mcp/sse"
+    echo "  claude mcp add --scope user --transport sse airis-mcp-gateway http://localhost:9400/sse"
 }
 
 cmd_down() {
@@ -90,7 +71,7 @@ cmd_status() {
         log_warn "Gateway not installed."
     fi
     echo ""
-    echo "Config: $CONFIG_DIR/mcp-config.json"
+    echo "Config: $DIR/mcp-config.json"
     echo "Repo:   $DIR"
 }
 
@@ -100,9 +81,9 @@ cmd_restart() {
 }
 
 cmd_config() {
-    echo "$CONFIG_DIR/mcp-config.json"
-    if [ -f "$CONFIG_DIR/mcp-config.json" ]; then
-        ${EDITOR:-vim} "$CONFIG_DIR/mcp-config.json"
+    echo "$DIR/mcp-config.json"
+    if [ -f "$DIR/mcp-config.json" ]; then
+        ${EDITOR:-vim} "$DIR/mcp-config.json"
     else
         log_error "Config not found. Run 'airis-gateway up' first."
         exit 1
@@ -110,12 +91,12 @@ cmd_config() {
 }
 
 cmd_servers() {
-    if [ ! -f "$CONFIG_DIR/mcp-config.json" ]; then
+    if [ ! -f "$DIR/mcp-config.json" ]; then
         log_error "Config not found. Run 'airis-gateway up' first."
         exit 1
     fi
 
-    echo "MCP Servers ($CONFIG_DIR/mcp-config.json):"
+    echo "MCP Servers ($DIR/mcp-config.json):"
     echo ""
 
     # Parse JSON and list servers with status
@@ -124,7 +105,7 @@ import json
 import sys
 
 try:
-    with open('$CONFIG_DIR/mcp-config.json') as f:
+    with open('$DIR/mcp-config.json') as f:
         config = json.load(f)
 
     servers = config.get('mcpServers', {})
@@ -161,7 +142,7 @@ cmd_enable() {
         exit 1
     fi
 
-    if [ ! -f "$CONFIG_DIR/mcp-config.json" ]; then
+    if [ ! -f "$DIR/mcp-config.json" ]; then
         log_error "Config not found. Run 'airis-gateway up' first."
         exit 1
     fi
@@ -171,7 +152,7 @@ import json
 import sys
 
 server = '$server'
-config_path = '$CONFIG_DIR/mcp-config.json'
+config_path = '$DIR/mcp-config.json'
 
 with open(config_path) as f:
     config = json.load(f)
@@ -209,7 +190,7 @@ cmd_disable() {
         exit 1
     fi
 
-    if [ ! -f "$CONFIG_DIR/mcp-config.json" ]; then
+    if [ ! -f "$DIR/mcp-config.json" ]; then
         log_error "Config not found. Run 'airis-gateway up' first."
         exit 1
     fi
@@ -219,7 +200,7 @@ import json
 import sys
 
 server = '$server'
-config_path = '$CONFIG_DIR/mcp-config.json'
+config_path = '$DIR/mcp-config.json'
 
 with open(config_path) as f:
     config = json.load(f)
@@ -258,13 +239,11 @@ Server Management:
   disable <server>    Disable an MCP server
 
 Configuration:
-  Config dir: $CONFIG_DIR
-  Repo dir:   $DIR
+  Install dir: $DIR
 
 Environment variables:
-  AIRIS_CONFIG_DIR    Config directory (default: ~/.config/airis-mcp-gateway)
-  AIRIS_MCP_DIR       Repository directory (default: ~/.local/share/airis-mcp-gateway)
-  AIRIS_MCP_REPO      Git repository URL
+  AIRIS_MCP_DIR       Install directory (default: ~/.local/share/airis-mcp-gateway)
+  AIRIS_VERSION       Version (default: latest)
 
 Ports:
   9400  API (REST + MCP SSE)
@@ -291,6 +270,18 @@ case "${1:-help}" in
     servers) cmd_servers ;;
     enable)  shift; cmd_enable "${1:-}" ;;
     disable) shift; cmd_disable "${1:-}" ;;
+    --uninstall|-u|uninstall)
+        log_warn "Uninstalling AIRIS MCP Gateway..."
+        if command -v claude >/dev/null 2>&1; then
+            claude mcp remove airis-mcp-gateway --scope user 2>/dev/null || true
+        fi
+        if [ -f "$DIR/docker-compose.yml" ]; then
+            cd "$DIR" && docker compose down -v 2>/dev/null || true
+        fi
+        [ -d "$DIR" ] && rm -rf "$DIR" && log_info "Removed $DIR"
+        [ -f "$HOME/.local/bin/airis-gateway" ] && rm -f "$HOME/.local/bin/airis-gateway" && log_info "Removed CLI"
+        log_info "Uninstall complete."
+        ;;
     help|--help|-h) cmd_help ;;
     *)
         log_error "Unknown command: $1"
