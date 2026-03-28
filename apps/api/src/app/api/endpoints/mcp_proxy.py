@@ -621,7 +621,6 @@ async def apply_schema_partitioning(data: Dict[str, Any]) -> Dict[str, Any]:
             logger.error(f"Failed to list HOT tools: {e}")
 
         # Build tool listing for airis-exec description (excludes HOT tools to avoid duplication)
-        from app.core.config import settings
         tool_listing = dynamic_mcp.build_tool_listing(
             excluded_servers=excluded_servers,
             hot_exposed_tools=hot_tool_names,

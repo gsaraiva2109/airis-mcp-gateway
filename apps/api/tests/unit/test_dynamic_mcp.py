@@ -480,19 +480,18 @@ class TestDynamicMCPModeWithHotTools:
         assert hot_tool_names.isdisjoint(cold_tool_names)
 
     def test_combined_tools_for_dynamic_mode(self, mcp_with_hot_and_cold):
-        """In Dynamic MCP mode, tools/list should return ONLY meta-tools."""
+        """In Dynamic MCP mode, tools/list should return ONLY core meta-tools."""
         meta_tools = mcp_with_hot_and_cold.get_meta_tools()
 
-        # Dynamic MCP mode: ONLY meta-tools (no HOT tools exposed directly)
-        # All tools (HOT and COLD) are accessed via airis-exec
+        # Dynamic MCP mode: ONLY core meta-tools (no HOT tools exposed directly)
         dynamic_tools = list(meta_tools)
 
-        # Expected: 7 meta-tools ONLY
-        assert len(dynamic_tools) == 7
+        # Expected: 3 core meta-tools ONLY
+        assert len(dynamic_tools) == 3
 
-        # Verify ONLY meta-tools are present
+        # Verify ONLY core meta-tools are present
         tool_names = {t["name"] for t in dynamic_tools}
-        assert tool_names == {"airis-find", "airis-exec", "airis-schema", "airis-confidence", "airis-repo-index", "airis-suggest", "airis-route"}
+        assert tool_names == {"airis-find", "airis-exec", "airis-schema"}
 
         # Verify HOT tools are NOT directly exposed
         assert "gateway_list_servers" not in tool_names
