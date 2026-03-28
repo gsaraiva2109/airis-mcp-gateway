@@ -314,10 +314,10 @@ async def proxy_sse_stream(request: Request):
     Yields:
         Server-Sent Events
     """
-    initialize_request_id = None  # initialize リクエストIDを追跡
-    session_id = request.query_params.get("sessionid")  # セッションID追跡
-    endpoint_url = None  # エンドポイントURL追跡
-    captured_session_id = None  # Gateway から取得したセッションID
+    initialize_request_id = None  # Track initialize request ID
+    session_id = request.query_params.get("sessionid")  # Track session ID
+    endpoint_url = None  # Track endpoint URL
+    captured_session_id = None  # Session ID captured from Gateway
 
     # Codex streamable_http sometimes POSTs to /sse with Content-Length headers.
     # Strip entity headers so the proxied GET doesn't advertise a body it never sends.
@@ -452,13 +452,13 @@ async def proxy_sse_stream(request: Request):
                             continue
 
                         if source == "process_manager":
-                            # ProcessManager からのレスポンスを SSE で送信
+                            # Send ProcessManager response via SSE
                             queue_task = None
                             logger.info(f"Sending ProcessManager response via SSE: id={data.get('id') if isinstance(data, dict) else None}")
                             yield f"event: message\ndata: {json.dumps(data)}\n\n"
                             continue
 
-                        # Gateway からのメッセージ
+                        # Message from Gateway
                         gateway_task = None
                         line = data
 
@@ -466,13 +466,13 @@ async def proxy_sse_stream(request: Request):
                             yield "\n"
                             continue
 
-                        # SSE形式: "event: xxx\n" or "data: {...}\n\n"
+                        # SSE format: "event: xxx\n" or "data: {...}\n\n"
                         if line.startswith("event: endpoint"):
                             yield f"{line}\n"
                             continue
 
                         if line.startswith("data: "):
-                            data_str = line[6:]  # "data: " を除去
+                            data_str = line[6:]  # Strip "data: " prefix
 
                             # Check if it's an endpoint URL (not JSON)
                             if not data_str.startswith("{") and not data_str.startswith("["):
@@ -492,23 +492,23 @@ async def proxy_sse_stream(request: Request):
                             try:
                                 json_data = json.loads(data_str)
 
-                                # initialize リクエストを検出（SSEストリームで見えることはないが念のため）
+                                # Detect initialize request (unlikely in SSE stream, but just in case)
                                 if isinstance(json_data, dict) and json_data.get("method") == "initialize":
                                     initialize_request_id = json_data.get("id")
                                     logger.info(f"Detected initialize request (id={initialize_request_id})")
                                     await protocol_logger.log_message("client→server", json_data, {"phase": "initialize"})
 
-                                # tools/list レスポンスをインターセプト
+                                # Intercept tools/list response
                                 if isinstance(json_data, dict) and "result" in json_data and "tools" in json_data.get("result", {}):
                                     await protocol_logger.log_message("client→server", json_data, {"phase": "tools_list"})
                                     json_data = await apply_schema_partitioning(json_data)
                                     await protocol_logger.log_message("server→client", json_data, {"phase": "tools_list"})
 
-                                # prompts/list レスポンスをインターセプト（Process MCP サーバーのプロンプトを追加）
+                                # Intercept prompts/list response (merge Process MCP server prompts)
                                 if isinstance(json_data, dict) and "result" in json_data and "prompts" in json_data.get("result", {}):
                                     json_data = await apply_prompts_merging(json_data)
 
-                                # initialize response を検出したら instructions を追加
+                                # Inject instructions into initialize response
                                 is_initialize_response = (
                                     isinstance(json_data, dict) and
                                     "result" in json_data and
@@ -520,22 +520,22 @@ async def proxy_sse_stream(request: Request):
                                     server_configs = load_mcp_config()
                                     json_data["result"]["instructions"] = compile_instructions(server_configs)
 
-                                # 変換後のデータを返す
+                                # Yield transformed data
                                 yield f"data: {json.dumps(json_data)}\n\n"
 
-                                # initialize responseを検出したらGatewayに notifications/initialized を POST
+                                # On initialize response, POST notifications/initialized to Gateway
                                 if is_initialize_response:
 
                                     logger.info(f"Detected initialize response, sending initialized notification to Gateway")
                                     await protocol_logger.log_message("server→client", json_data, {"phase": "initialize"})
 
-                                    # Gateway に notifications/initialized を POST
+                                    # POST notifications/initialized to Gateway
                                     initialized_notification = {
                                         "jsonrpc": "2.0",
                                         "method": "notifications/initialized"
                                     }
 
-                                    # sessionid を使って Gateway に POST
+                                    # POST to Gateway using sessionid
                                     if captured_session_id:
                                         gateway_post_url = f"{settings.MCP_GATEWAY_URL.rstrip('/')}/sse?sessionid={captured_session_id}"
                                         try:
@@ -586,7 +586,7 @@ async def apply_prompts_merging(data: Dict[str, Any]) -> Dict[str, Any]:
 
     prompts = list(data["result"]["prompts"])
 
-    # Process MCP サーバーからプロンプトを取得して統合
+    # Fetch and merge prompts from Process MCP servers
     try:
         process_manager = get_process_manager()
         process_prompts = await process_manager.list_prompts(mode="hot")
@@ -699,9 +699,9 @@ async def apply_schema_partitioning(data: Dict[str, Any]) -> Dict[str, Any]:
     # Standard mode: merge HOT tools and apply schema partitioning
     tools = docker_tools
 
-    # Process MCP サーバーからツールを取得して統合（HOT のみ）
+    # Fetch and merge tools from Process MCP servers (HOT only)
     try:
-        # HOT サーバーのツールのみ返却（COLD はオンデマンド）
+        # Only return HOT server tools (COLD loaded on demand)
         process_tools = await process_manager.list_tools(mode="hot")
         hot_servers = process_manager.get_hot_servers()
         cold_servers = process_manager.get_cold_servers()
@@ -718,7 +718,7 @@ async def apply_schema_partitioning(data: Dict[str, Any]) -> Dict[str, Any]:
         tool_name = tool.get("name", "")
         input_schema = tool.get("inputSchema", {})
 
-        # フルスキーマを保存（expandSchema用）
+        # Store full schema for expandSchema
         if input_schema:
             schema_partitioner.store_full_schema(tool_name, input_schema)
 
@@ -730,10 +730,10 @@ async def apply_schema_partitioning(data: Dict[str, Any]) -> Dict[str, Any]:
             mode=settings.DESCRIPTION_MODE
         )
 
-        # スキーマを分割
+        # Partition schema
         partitioned_schema = schema_partitioner.partition_schema(input_schema)
 
-        # トークン削減効果をログ出力
+        # Log token reduction stats
         reduction = schema_partitioner.get_token_reduction_estimate(input_schema)
         logger.debug(f" {tool_name}: {reduction['full']} → {reduction['partitioned']} tokens ({reduction['reduction']}% reduction)")
 
@@ -760,7 +760,7 @@ async def apply_schema_partitioning(data: Dict[str, Any]) -> Dict[str, Any]:
 
         partitioned_tools.append(partitioned_tool)
 
-    # expandSchema ツールを追加
+    # Add expandSchema tool
     expand_schema_tool = {
         "name": "expandSchema",
         "description": "Lazy-load schemas or documentation for a specific tool. Use mode='schema' (default) for JSON schema or mode='docs' for the full description.",
@@ -1165,14 +1165,14 @@ async def _proxy_jsonrpc_request(request: Request) -> Response:
             except Exception as e:
                 logger.error(f"Init sequence failed: {e}")
 
-    # expandSchema ツールコール処理
+    # Handle expandSchema tool call
     if rpc_request.get("method") == "tools/call":
         params = rpc_request.get("params", {})
         tool_name = params.get("name", "")
         arguments = params.get("arguments", {})
 
         if tool_name == "expandSchema":
-            # expandSchema は Gateway にproxyしない（ローカル処理）
+            # Handle locally, do not proxy to Gateway
             return await handle_expand_schema(rpc_request)
 
         # Dynamic MCP meta-tools (only when DYNAMIC_MCP=true)
@@ -1197,42 +1197,42 @@ async def _proxy_jsonrpc_request(request: Request) -> Response:
         if tool_name == "airis-route":
             return await handle_airis_route(rpc_request, session_id=session_id)
 
-    # prompts/get リクエスト処理
+    # Handle prompts/get request
     if rpc_request.get("method") == "prompts/get":
         params = rpc_request.get("params", {})
         prompt_name = params.get("name", "")
         arguments = params.get("arguments", {})
 
-        # Process MCP サーバーのプロンプトを優先的に処理
-        # (キャッシュがなくても get_prompt は有効なサーバーを検索する)
+        # Try Process MCP servers first
+        # (get_prompt searches active servers even without cache)
         try:
             process_manager = get_process_manager()
             logger.info(f"Trying ProcessManager for prompt: {prompt_name}")
             server_response = await process_manager.get_prompt(prompt_name, arguments)
 
-            # Prompt not found の場合は Docker Gateway にフォールバック
+            # Fall back to Docker Gateway if prompt not found
             if "error" in server_response and server_response["error"].get("code") == -32601:
                 logger.info(f"Prompt {prompt_name} not found in ProcessManager, falling through to Gateway")
             else:
-                # JSON-RPC レスポンス形式で返す (クライアントのIDを使用)
+                # Build JSON-RPC response using client's request ID
                 response_data = {
                     "jsonrpc": "2.0",
                     "id": rpc_request.get("id"),
                 }
-                # サーバーレスポンスからresultまたはerrorを抽出
+                # Extract result or error from server response
                 if "error" in server_response:
                     response_data["error"] = server_response["error"]
                 else:
                     response_data["result"] = server_response.get("result")
 
-                # MCP SSE Transport: レスポンスはSSEストリーム経由で送信
+                # MCP SSE Transport: send response via SSE stream
                 if session_id:
                     queue = await get_response_queue(session_id)
                     await queue.put(response_data)
                     logger.info(f"Queued prompts/get response for session {session_id}")
                     return Response(status_code=202)
 
-                # sessionid がない場合はHTTPレスポンスで返す（フォールバック）
+                # Fallback to HTTP response when no sessionid
                 return Response(
                     content=json.dumps(response_data),
                     status_code=200,
@@ -1241,38 +1241,38 @@ async def _proxy_jsonrpc_request(request: Request) -> Response:
         except Exception as e:
             logger.error(f"ProcessManager prompt routing failed: {e}")
 
-    # tools/call リクエスト処理
+    # Handle tools/call request
     if rpc_request.get("method") == "tools/call":
         params = rpc_request.get("params", {})
         tool_name = params.get("name", "")
         arguments = params.get("arguments", {})
 
-        # Process MCP サーバーのツールかチェック
+        # Check if tool belongs to a Process MCP server
         try:
             process_manager = get_process_manager()
-            # ツール名がProcessManagerに登録されているか確認
+            # Check if tool name is registered in ProcessManager
             if tool_name in process_manager._tool_to_server:
                 logger.info(f"Routing {tool_name} to ProcessManager")
                 server_response = await process_manager.call_tool(tool_name, arguments)
-                # JSON-RPC レスポンス形式で返す (クライアントのIDを使用)
+                # Build JSON-RPC response using client's request ID
                 response_data = {
                     "jsonrpc": "2.0",
                     "id": rpc_request.get("id"),
                 }
-                # サーバーレスポンスからresultまたはerrorを抽出
+                # Extract result or error from server response
                 if "error" in server_response:
                     response_data["error"] = server_response["error"]
                 else:
                     response_data["result"] = server_response.get("result")
 
-                # MCP SSE Transport: レスポンスはSSEストリーム経由で送信
+                # MCP SSE Transport: send response via SSE stream
                 if session_id:
                     queue = await get_response_queue(session_id)
                     await queue.put(response_data)
                     logger.info(f"Queued tools/call response for session {session_id}")
                     return Response(status_code=202)
 
-                # sessionid がない場合はHTTPレスポンスで返す（フォールバック）
+                # Fallback to HTTP response when no sessionid
                 return Response(
                     content=json.dumps(response_data),
                     status_code=200,
@@ -1281,7 +1281,7 @@ async def _proxy_jsonrpc_request(request: Request) -> Response:
         except Exception as e:
             logger.error(f"ProcessManager routing check failed: {e}")
 
-    # その他のツールコールはGatewayにproxy
+    # Proxy all other tool calls to Gateway
     if not session_id:
         # RMCP streamable_http clients (Codex) expect streaming responses.
         return await _proxy_streaming_gateway_request(
@@ -1304,7 +1304,7 @@ async def _proxy_jsonrpc_request(request: Request) -> Response:
             follow_redirects=True,
         )
 
-        # initialize リクエストが成功したら、notifications/initialized を Gateway に送信
+        # On successful initialize, send notifications/initialized to Gateway
         if is_initialize_request and response.status_code in (200, 202):
             logger.info(f"Initialize request successful, sending initialized notification to Gateway (sessionid={session_id})")
             initialized_notification = {
@@ -1972,7 +1972,7 @@ async def handle_expand_schema(rpc_request: Dict[str, Any]) -> Response:
 
         response_content = detailed_description
     else:
-        # フルスキーマから該当パスを取得
+        # Retrieve the requested path from full schema
         expanded_schema = schema_partitioner.expand_schema(tool_name, path)
 
         if expanded_schema is None:
