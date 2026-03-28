@@ -5,7 +5,7 @@
 <h1 align="center">AIRIS MCP Gateway</h1>
 
 <p align="center">
-  <em>One command. 60+ AI tools. Zero config.</em>
+  <em>One gateway. 60+ AI tools. All managed.</em>
 </p>
 
 <p align="center">
@@ -43,54 +43,45 @@ claude mcp add --scope user --transport sse airis-mcp-gateway http://localhost:9
 
 </details>
 
-That's it. 60+ tools are now available through 3 token-efficient meta-tools.
+That's it. 60+ tools from 20+ MCP servers, all through a single endpoint.
 
 > **Other MCP clients** (Cursor, Zed, etc.): Connect via SSE at `http://localhost:9400/sse`
 
 ## Why AIRIS MCP Gateway?
 
-- **98% token savings** — 3 meta-tools instead of 60+ raw tool definitions (~42,000 → ~600 tokens). Follows [Anthropic's recommendation](https://www.anthropic.com/engineering/code-execution-with-mcp) for progressive disclosure.
-- **Auto-enable on demand** — Disabled servers are discoverable and auto-start when called. No manual enable/disable needed.
-- **HOT/COLD lifecycle** — HOT servers are always ready; COLD servers start on-demand and auto-terminate when idle. Resource-efficient.
+- **One endpoint, 60+ tools** — Stripe, Supabase, Tavily, GitHub, and more. All consolidated behind a single SSE connection. No need to register each MCP server individually.
+- **Centralized secrets** — API keys stay in one place (`mcp-config.json`). Never scattered across project configs or Claude Code settings.
+- **Auto-enable on demand** — Servers start when called, terminate when idle. No manual management. Add a new server with one JSON entry.
 - **Docker-isolated** — All MCP servers run inside Docker. No host pollution, consistent across machines.
+- **Smart tool management** — LLMs pick the right tool from 60+ options. Tools are organized by server with on-demand schema loading. Works with Claude Code's deferred tool loading for zero initial context cost.
 - **Works with any MCP client** — Claude Code, Cursor, Zed, or any SSE-compatible client.
-- **Extensible** — Add any MCP server (npx, uvx, mcp-remote) via a single JSON config entry.
 
 ## How It Works
 
-Dynamic MCP exposes 3 meta-tools instead of 60+. The key innovation: **`airis-exec` embeds a compact tool listing in its description**, so LLMs already know every available tool and can call them directly — no discovery step needed.
-
-| Meta-Tool | Description |
-|-----------|-------------|
-| `airis-exec` | **Execute any tool in one call.** Tool listing embedded in description. |
-| `airis-find` | Search for tools not listed in airis-exec (fallback) |
-| `airis-schema` | Get full input schema (when arguments are unclear) |
-
-> 4 additional meta-tools (confidence, repo-index, suggest, route) are available with `META_TOOLS_MODE=full`.
-
-### One-Call Workflow
+Register 20+ MCP servers in `mcp-config.json`. The gateway consolidates them behind a single SSE endpoint. Your AI agent connects once and gets access to everything.
 
 ```
-User: "Save this note about the meeting"
-
-Claude sees airis-exec description:
-  Available tools:
-  [memory] create_entities, search_nodes, add_observations, ...
-  [tavily] tavily-search, tavily-extract
-  [stripe] create_customer, create_payment_intent, ...
-
-Claude: [calls airis-exec tool="memory:create_entities" arguments={...}]
-→ Done! (1 call)
+Without Gateway:                          With Gateway:
+  claude mcp add stripe ...                 claude mcp add airis-mcp-gateway ...
+  claude mcp add supabase ...               # Done. 60+ tools available.
+  claude mcp add tavily ...
+  claude mcp add memory ...
+  claude mcp add context7 ...
+  # Manage 20 servers individually...
 ```
 
-No `airis-find` needed — the LLM already knows what tools exist. If arguments are wrong, the schema is returned automatically so the next call succeeds.
+Servers start on-demand when a tool is called and auto-terminate when idle. No resources wasted.
 
 ```
-Traditional: 60+ tools × ~700 tokens = ~42,000 tokens
-Dynamic MCP: 3 meta-tools × ~200 tokens =    ~600 tokens (98% reduction)
+User: "Create a Stripe customer for user@example.com"
+
+Claude: [calls stripe:create_customer arguments={email: "user@example.com"}]
+→ Gateway starts Stripe server → executes → returns result → server idles out
 ```
 
-> See [Dynamic MCP deep-dive](./docs/dynamic-mcp.md) for architecture details, cache behavior, and configuration.
+> **Claude Code 2.1.85+** loads tool schemas on-demand (deferred), so even 60+ tools add zero initial context cost. The gateway handles server lifecycle, auth, and routing.
+
+> See [Dynamic MCP deep-dive](./docs/dynamic-mcp.md) for architecture details and configuration.
 
 ## Choose Your Level
 
@@ -125,15 +116,17 @@ Claude Code / Cursor / Zed
     │
     ▼ SSE (http://localhost:9400/sse)
 ┌─────────────────────────────────────────────────────────┐
-│  FastAPI Hybrid MCP Multiplexer (port 9400)             │
+│  AIRIS MCP Gateway (port 9400)                          │
 │                                                         │
 │  ┌───────────────────────────────────────────────┐      │
-│  │  Dynamic MCP Layer (3 meta-tools)              │      │
+│  │  ProcessManager (on-demand lifecycle)         │      │
+│  │  context7, tavily, supabase, stripe, ...      │      │
+│  │  Starts on first call, idles out when unused  │      │
 │  └───────────────────────────────────────────────┘      │
 │                                                         │
 │  ┌───────────────────────────────────────────────┐      │
-│  │  ProcessManager (HOT + COLD servers)          │      │
-│  │  context7, tavily, supabase, stripe, ...      │      │
+│  │  Secrets & Auth (mcp-config.json)             │      │
+│  │  API keys injected at runtime, never exposed  │      │
 │  └───────────────────────────────────────────────┘      │
 │                                                         │
 │  ┌───────────────────────────────────────────────┐      │
@@ -147,25 +140,23 @@ Claude Code / Cursor / Zed
 <details>
 <summary><h2>Available Servers</h2></summary>
 
-### Enabled by Default
+### Enabled (start on-demand)
 
-| Server | Mode | Description |
-|--------|------|-------------|
-| **airis-mcp-gateway-control** | HOT | Gateway management tools |
-| **airis-commands** | HOT | Config and profile management |
-| **context7** | COLD | Library documentation lookup |
-| **fetch** | COLD | Web page fetching as markdown |
-| **memory** | COLD | Knowledge graph (entities, relations) |
-| **sequential-thinking** | COLD | Step-by-step reasoning |
-| **serena** | COLD | Semantic code retrieval and editing |
-| **tavily** | COLD | Web search via Tavily API |
-| **magic** | COLD | UI component generation |
-| **morphllm** | COLD | Code editing with warpgrep |
-| **chrome-devtools** | COLD | Chrome debugging |
-| **supabase** | COLD | Supabase database management |
-| **stripe** | COLD | Stripe payments API |
+| Server | Description |
+|--------|-------------|
+| **context7** | Library documentation lookup |
+| **memory** | Knowledge graph (entities, relations) |
+| **tavily** | Web search via Tavily API |
+| **supabase** | Supabase database management |
+| **stripe** | Stripe payments API |
+| **fetch** | Web page fetching as markdown |
+| **sequential-thinking** | Step-by-step reasoning |
+| **serena** | Semantic code retrieval and editing |
+| **magic** | UI component generation |
+| **morphllm** | Code editing with warpgrep |
+| **chrome-devtools** | Chrome debugging |
 
-### Disabled by Default (Auto-Enable via airis-exec)
+### Disabled (auto-enable when called)
 
 | Server | Description |
 |--------|-------------|
@@ -177,15 +168,13 @@ Claude Code / Cursor / Zed
 | **git** | Git operations |
 | **time** | Time utilities |
 
-**HOT**: Always running, immediate response. **COLD**: Start on-demand, auto-terminate when idle.
-
-Disabled servers are discoverable via `airis-find` and automatically enabled when you call `airis-exec`.
+All servers start on first tool call and auto-terminate when idle. Disabled servers are automatically enabled when you call their tools — no manual setup needed.
 
 </details>
 
 ## Airis Ecosystem
 
-- **[airis-mcp-gateway](https://github.com/agiletec-inc/airis-mcp-gateway)** — 60+ MCP tools through 7 meta-tools. The hub. *(this repo)*
+- **[airis-mcp-gateway](https://github.com/agiletec-inc/airis-mcp-gateway)** — 60+ MCP tools through one gateway. The hub. *(this repo)*
 - **[airis-monorepo](https://github.com/agiletec-inc/airis-monorepo)** — Docker-first monorepo CLI. `manifest.toml` generates Dockerfile, compose, and CI configs automatically.
 - **[mindbase](https://github.com/agiletec-inc/mindbase)** — Cross-session AI memory with semantic search. Included in the Docker setup.
 
