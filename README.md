@@ -19,18 +19,20 @@
 ## Quick Start
 
 ```bash
-# 1. Start the gateway
+# 1. Clone and start the gateway
 git clone https://github.com/agiletec-inc/airis-mcp-gateway.git
 cd airis-mcp-gateway && docker compose up -d
 
-# 2. Connect to Claude Code (or any MCP client)
+# 2. Register as a global MCP server in Claude Code
 claude mcp add --scope user --transport sse airis-mcp-gateway http://localhost:9400/sse
 
-# 3. Verify
-curl http://localhost:9400/health
+# 3. Verify in Claude Code
+/mcp   # Shows: airis-mcp-gateway ✔ connected, 9 tools
 ```
 
 That's it. 60+ tools are now available through 7 token-efficient meta-tools.
+
+> **Other MCP clients** (Cursor, Zed, etc.): Connect via SSE at `http://localhost:9400/sse`
 
 ## Why AIRIS MCP Gateway?
 
