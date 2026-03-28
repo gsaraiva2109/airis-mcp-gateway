@@ -271,6 +271,36 @@ def _extract_server_name_from_tool(tool_name: str) -> Optional[str]:
     return parts[0] if parts else None
 
 
+class SSEEventBuffer:
+    """Buffers SSE lines and emits complete events atomically."""
+
+    def __init__(self):
+        self.buffer: list[str] = []
+
+    def add_line(self, line: str) -> Optional[str]:
+        """Add a line. Returns complete event string when a blank line is seen."""
+        if line.startswith(":"):
+            # SSE comment (keepalive) — pass through immediately
+            return f"{line}\n\n"
+        if line == "":
+            if self.buffer:
+                complete_event = "\n".join(self.buffer) + "\n\n"
+                self.buffer = []
+                return complete_event
+            return None
+        else:
+            self.buffer.append(line)
+            return None
+
+    def flush(self) -> Optional[str]:
+        """Flush any remaining buffered lines."""
+        if self.buffer:
+            complete_event = "\n".join(self.buffer) + "\n\n"
+            self.buffer = []
+            return complete_event
+        return None
+
+
 async def proxy_sse_stream(request: Request):
     """
     SSEストリームをDocker MCP GatewayからProxyしてschema partitioning適用
@@ -345,20 +375,23 @@ async def proxy_sse_stream(request: Request):
             gateway_task = None
             queue_task = None
             keepalive_task = None
+            gateway_stream_alive = True
+            sse_buffer = SSEEventBuffer()
 
             try:
                 while True:
                     # Start tasks if needed
-                    if gateway_task is None:
+                    if gateway_task is None and gateway_stream_alive:
                         gateway_task = asyncio.create_task(gateway_gen.__anext__())
                     if queue_task is None:
                         queue_task = asyncio.create_task(queue_gen.__anext__())
                     if keepalive_task is None:
                         keepalive_task = asyncio.create_task(keepalive_gen.__anext__())
 
-                    # Wait for any to complete
+                    # Wait for any to complete (only include active tasks)
+                    tasks_to_wait = [t for t in [gateway_task, queue_task, keepalive_task] if t is not None]
                     done, _ = await asyncio.wait(
-                        [gateway_task, queue_task, keepalive_task],
+                        tasks_to_wait,
                         return_when=asyncio.FIRST_COMPLETED
                     )
 
@@ -366,23 +399,42 @@ async def proxy_sse_stream(request: Request):
                         try:
                             source, data = task.result()
                         except StopAsyncIteration:
-                            # Gateway stream ended
+                            if task is gateway_task:
+                                # Gateway stream ended — continue serving process manager responses
+                                logger.info(f"Gateway SSE stream ended, continuing with process manager (session={captured_session_id})")
+                                gateway_task = None
+                                gateway_stream_alive = False
+                                continue
                             if captured_session_id:
                                 await remove_response_queue(captured_session_id)
                             return
                         except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ConnectError) as e:
+                            if task is gateway_task:
+                                logger.info(f"Gateway disconnected ({type(e).__name__}), continuing with process manager (session={captured_session_id})")
+                                gateway_task = None
+                                gateway_stream_alive = False
+                                continue
                             # Client disconnected - this is normal, exit gracefully
                             logger.info(f"Client disconnected: {type(e).__name__}")
                             if captured_session_id:
                                 await remove_response_queue(captured_session_id)
                             return
                         except httpx.ReadTimeout:
-                            # SSE read timeout - connection may be stale
+                            if task is gateway_task:
+                                logger.info(f"Gateway SSE idle timeout, continuing with process manager (session={captured_session_id})")
+                                gateway_task = None
+                                gateway_stream_alive = False
+                                continue
                             logger.info(f"SSE read timeout (session={captured_session_id})")
                             if captured_session_id:
                                 await remove_response_queue(captured_session_id)
                             return
                         except httpx.TimeoutException as e:
+                            if task is gateway_task:
+                                logger.info(f"Gateway timeout ({type(e).__name__}), continuing with process manager (session={captured_session_id})")
+                                gateway_task = None
+                                gateway_stream_alive = False
+                                continue
                             # Other timeout (connect, pool, etc.)
                             logger.info(f"Timeout exception: {type(e).__name__}")
                             if captured_session_id:
@@ -403,7 +455,7 @@ async def proxy_sse_stream(request: Request):
                             # ProcessManager からのレスポンスを SSE で送信
                             queue_task = None
                             logger.info(f"Sending ProcessManager response via SSE: id={data.get('id') if isinstance(data, dict) else None}")
-                            yield f"data: {json.dumps(data)}\n\n"
+                            yield f"event: message\ndata: {json.dumps(data)}\n\n"
                             continue
 
                         # Gateway からのメッセージ
@@ -1545,6 +1597,13 @@ async def handle_airis_exec(rpc_request: Dict[str, Any], session_id: Optional[st
 
     tool_ref = arguments.get("tool")
     tool_args = arguments.get("arguments", {})
+    # Handle string-encoded JSON arguments (Claude Code may send "{}" instead of {})
+    if isinstance(tool_args, str):
+        try:
+            tool_args = json.loads(tool_args)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(f"Failed to parse string arguments: {tool_args[:100]}")
+            tool_args = {}
 
     if not tool_ref:
         return Response(
