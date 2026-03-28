@@ -222,7 +222,22 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"ProcessManager init failed: {e}")
 
+    # Start periodic cleanup of stale session queues
+    async def _periodic_queue_cleanup():
+        while True:
+            await asyncio.sleep(600)  # every 10 minutes
+            try:
+                removed = await mcp_proxy.cleanup_stale_queues()
+                if removed > 0:
+                    logger.info(f"Cleaned up {removed} stale session queue(s)")
+            except Exception as e:
+                logger.warning(f"Session queue cleanup error: {e}")
+
+    cleanup_task = asyncio.create_task(_periodic_queue_cleanup())
+
     yield
+
+    cleanup_task.cancel()
 
     # Graceful shutdown with timeout
     logger.info(f"Shutting down (timeout: {SHUTDOWN_TIMEOUT}s)...")

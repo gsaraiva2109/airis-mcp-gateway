@@ -50,6 +50,7 @@ class ProcessManager:
         self._server_configs: dict[str, McpServerConfig] = {}
         self._tool_to_server: dict[str, str] = {}  # tool_name -> server_name
         self._prompt_to_server: dict[str, str] = {}  # prompt_name -> server_name
+        self._server_locks: dict[str, asyncio.Lock] = {}  # per-server locks
         self._initialized = False
 
     async def initialize(self):
@@ -230,6 +231,12 @@ class ProcessManager:
 
         return all_tools
 
+    def _get_server_lock(self, name: str) -> asyncio.Lock:
+        """Get or create a per-server lock to prevent concurrent initialization."""
+        if name not in self._server_locks:
+            self._server_locks[name] = asyncio.Lock()
+        return self._server_locks[name]
+
     async def _list_tools_for_server(self, name: str) -> list[dict[str, Any]]:
         """Get tools for a specific server (starts process if needed)."""
         runner = self._runners.get(name)
@@ -240,19 +247,20 @@ class ProcessManager:
         if not config or not config.enabled:
             return []
 
-        # Ensure process is running and initialized
-        success, error = await runner.ensure_ready_with_error()
-        if not success:
-            logger.error(f"Failed to start server: {name} - {error or 'Unknown error'}")
-            return []
+        async with self._get_server_lock(name):
+            # Ensure process is running and initialized
+            success, error = await runner.ensure_ready_with_error()
+            if not success:
+                logger.error(f"Failed to start server: {name} - {error or 'Unknown error'}")
+                return []
 
-        # Cache tool -> server mapping
-        for tool in runner.tools:
-            tool_name = tool.get("name", "")
-            if tool_name:
-                self._tool_to_server[tool_name] = name
+            # Cache tool -> server mapping
+            for tool in runner.tools:
+                tool_name = tool.get("name", "")
+                if tool_name:
+                    self._tool_to_server[tool_name] = name
 
-        return runner.tools
+            return runner.tools
 
     def list_cached_tools(self, mode: Optional[str] = None) -> list[dict[str, Any]]:
         """
