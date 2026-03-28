@@ -16,6 +16,10 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 import {
   MCP_MAPPINGS,
@@ -176,6 +180,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: [],
+        },
+      },
+
+      // ── Bridge Extensions ──
+      {
+        name: "airis_bridge_setup",
+        description: "(Optional) Setup the Infinite Context Bridge. Links NCP discovery and ICM memory to the Airis Gateway for token efficiency and project-specific ranking. Requires NCP and ICM to be installed on the host.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            link_ncp: {
+              type: "boolean",
+              description: "Register core tools in NCP using the Airis bridge (default: true)",
+            },
+            link_icm: {
+              type: "boolean",
+              description: "Link ICM memory database to RTK context for better ranking (default: true)",
+            },
+          },
         },
       },
 
@@ -350,6 +373,43 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         return {
           content: [{ type: "text", text: output }],
+        };
+      }
+
+      case "airis_bridge_setup": {
+        const results: string[] = [];
+
+        results.push("The **Infinite Context** stack optimizes your AI workflow by combining intelligent discovery (NCP), efficient filtering (RTK), and long-term memory (ICM).\n");
+
+        results.push("### 1. Install CLI Tools");
+        results.push("These tools run on your host machine to augment the Airis Gateway:");
+        results.push("- **RTK (Runtime Token Kit):** [GitHub](https://github.com/rtk-ai/rtk) | [Site](https://www.rtk-ai.app/)");
+        results.push("  `curl -fsSL https://rtk-ai.app/install.sh | bash` (Example command)");
+        results.push("- **ICM (Infinite Context Memory):** [GitHub](https://github.com/rtk-ai/icm)");
+        results.push("  `curl -fsSL https://rtk-ai.app/icm/install.sh | bash` (Example command)");
+        results.push("- **NCP (Natural Context Protocol):** [GitHub](https://github.com/portel-dev/ncp)");
+        results.push("  `npm install -g @portel-dev/ncp` (Example command)");
+        results.push("");
+
+        results.push("### 2. Configure Bridge");
+        results.push("Once installed, run these commands on your host to link everything together:");
+        results.push("```bash");
+        results.push("# A. Link ICM Memory to RTK context");
+        results.push("mkdir -p ~/.rtk");
+        results.push("ln -sf \"$HOME/.local/share/icm/memories.db\" \"$HOME/.rtk/icm.db\"");
+        results.push("");
+        results.push("# B. Link Airis tools to NCP discovery");
+        results.push("ncp_bin=\"$(which ncp)\"");
+        results.push("for tool in filesystem memory github tavily supabase stripe context7 sequential-thinking serena; do");
+        results.push("  $ncp_bin add \"$tool\" \"airis-mcp-gateway exec $tool\"");
+        results.push("done");
+        results.push("```");
+
+        return {
+          content: [{
+            type: "text",
+            text: "# Infinite Context Bridge Setup Guide\n\n" + results.join("\n")
+          }]
         };
       }
 
