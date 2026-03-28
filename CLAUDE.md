@@ -98,7 +98,7 @@ Claude Code / Cursor / Zed
 ```
 
 **Key patterns:**
-- **Dynamic MCP** (default): 7 meta-tools exposed (airis-find, airis-exec, airis-schema + airis-confidence, airis-repo-index, airis-suggest, airis-route)
+- **Dynamic MCP** (default): 3 core meta-tools exposed (airis-find, airis-exec, airis-schema). Set `META_TOOLS_MODE=full` for 7 (+ airis-confidence, airis-repo-index, airis-suggest, airis-route)
 - **Auto-enable**: Disabled servers are auto-enabled when airis-exec is called
 - **Lazy loading**: Process servers start on first request, not at startup
 - **Idle-kill**: Unused servers terminate after 120s (configurable)
@@ -106,17 +106,15 @@ Claude Code / Cursor / Zed
 
 ## Dynamic MCP Mode
 
-By default, `DYNAMIC_MCP=true` exposes 7 meta-tools instead of 60+:
+By default, `DYNAMIC_MCP=true` exposes 3 core meta-tools instead of 60+:
 
 | Tool | Purpose |
 |------|---------|
 | `airis-find` | Search tools/servers (including disabled ones) |
 | `airis-exec` | Execute tool by name (auto-enables disabled servers) |
 | `airis-schema` | Get full input schema for a tool |
-| `airis-confidence` | Pre-implementation confidence check |
-| `airis-repo-index` | Generate repository structure overview |
-| `airis-suggest` | Tool recommendations from natural language |
-| `airis-route` | Route task to optimal tool chain |
+
+With `META_TOOLS_MODE=full`, 4 additional tools are exposed: airis-confidence, airis-repo-index, airis-suggest, airis-route.
 
 External tools (HOT and COLD) are accessed via `airis-exec`. This follows the [Lasso MCP Gateway](https://github.com/lasso-security/mcp-gateway) pattern.
 

@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     # instead of all available tools. This dramatically reduces context usage.
     DYNAMIC_MCP: bool = os.getenv("DYNAMIC_MCP", "true").lower() in ("true", "1", "yes")
 
+    # Meta-Tools Mode: "core" (3 tools: find/exec/schema) or "full" (all 7 including confidence/suggest/route)
+    META_TOOLS_MODE: str = os.getenv("META_TOOLS_MODE", "core")
+
+    # Tool Listing Mode: "full" (all tool names) or "compact" (top 3 per server + count)
+    TOOL_LISTING_MODE: str = os.getenv("TOOL_LISTING_MODE", "compact")
+
     # Tool Call Timeout (seconds)
     # Fail-safe timeout for MCP tool calls to prevent Claude Code from hanging indefinitely.
     # Applies to ProcessManager tool calls and Docker Gateway proxy requests.

@@ -18,6 +18,17 @@
 
 ## Quick Start
 
+### One-Command Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/agiletec-inc/airis-mcp-gateway/main/install.sh | bash
+```
+
+Downloads Docker images, starts the gateway, and registers with Claude Code automatically.
+
+<details>
+<summary><b>Manual Install</b> (if you prefer to see what's happening)</summary>
+
 ```bash
 # 1. Clone and start the gateway
 git clone https://github.com/agiletec-inc/airis-mcp-gateway.git
@@ -27,16 +38,18 @@ cd airis-mcp-gateway && docker compose up -d
 claude mcp add --scope user --transport sse airis-mcp-gateway http://localhost:9400/sse
 
 # 3. Verify in Claude Code
-/mcp   # Shows: airis-mcp-gateway ✔ connected, 9 tools
+/mcp   # Shows: airis-mcp-gateway ✔ connected
 ```
 
-That's it. 60+ tools are now available through 7 token-efficient meta-tools.
+</details>
+
+That's it. 60+ tools are now available through 3 token-efficient meta-tools.
 
 > **Other MCP clients** (Cursor, Zed, etc.): Connect via SSE at `http://localhost:9400/sse`
 
 ## Why AIRIS MCP Gateway?
 
-- **97% token savings** — 7 meta-tools instead of 60+ raw tool definitions (~42,000 → ~1,400 tokens). Follows [Anthropic's recommendation](https://www.anthropic.com/engineering/code-execution-with-mcp) for progressive disclosure.
+- **98% token savings** — 3 meta-tools instead of 60+ raw tool definitions (~42,000 → ~600 tokens). Follows [Anthropic's recommendation](https://www.anthropic.com/engineering/code-execution-with-mcp) for progressive disclosure.
 - **Auto-enable on demand** — Disabled servers are discoverable and auto-start when called. No manual enable/disable needed.
 - **HOT/COLD lifecycle** — HOT servers are always ready; COLD servers start on-demand and auto-terminate when idle. Resource-efficient.
 - **Docker-isolated** — All MCP servers run inside Docker. No host pollution, consistent across machines.
@@ -45,17 +58,15 @@ That's it. 60+ tools are now available through 7 token-efficient meta-tools.
 
 ## How It Works
 
-Dynamic MCP exposes 7 meta-tools instead of 60+. The key innovation: **`airis-exec` embeds a compact tool listing in its description**, so LLMs already know every available tool and can call them directly — no discovery step needed.
+Dynamic MCP exposes 3 meta-tools instead of 60+. The key innovation: **`airis-exec` embeds a compact tool listing in its description**, so LLMs already know every available tool and can call them directly — no discovery step needed.
 
 | Meta-Tool | Description |
 |-----------|-------------|
 | `airis-exec` | **Execute any tool in one call.** Tool listing embedded in description. |
 | `airis-find` | Search for tools not listed in airis-exec (fallback) |
 | `airis-schema` | Get full input schema (when arguments are unclear) |
-| `airis-confidence` | Pre-implementation confidence check |
-| `airis-repo-index` | Generate repository structure overview |
-| `airis-suggest` | Tool recommendations from natural language |
-| `airis-route` | Route task to optimal tool chain |
+
+> 4 additional meta-tools (confidence, repo-index, suggest, route) are available with `META_TOOLS_MODE=full`.
 
 ### One-Call Workflow
 
@@ -76,7 +87,7 @@ No `airis-find` needed — the LLM already knows what tools exist. If arguments 
 
 ```
 Traditional: 60+ tools × ~700 tokens = ~42,000 tokens
-Dynamic MCP: 7 meta-tools × ~200 tokens = ~1,400 tokens (97% reduction)
+Dynamic MCP: 3 meta-tools × ~200 tokens =    ~600 tokens (98% reduction)
 ```
 
 > See [Dynamic MCP deep-dive](./docs/dynamic-mcp.md) for architecture details, cache behavior, and configuration.
@@ -117,7 +128,7 @@ Claude Code / Cursor / Zed
 │  FastAPI Hybrid MCP Multiplexer (port 9400)             │
 │                                                         │
 │  ┌───────────────────────────────────────────────┐      │
-│  │  Dynamic MCP Layer (7 meta-tools)             │      │
+│  │  Dynamic MCP Layer (3 meta-tools)              │      │
 │  └───────────────────────────────────────────────┘      │
 │                                                         │
 │  ┌───────────────────────────────────────────────┐      │

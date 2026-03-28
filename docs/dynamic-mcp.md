@@ -16,7 +16,7 @@ This bloats the LLM's context window, reducing available space for actual work.
 
 ## The Solution: Meta-Tools
 
-Dynamic MCP exposes 7 meta-tools:
+Dynamic MCP exposes 3 core meta-tools (7 in full mode):
 
 | Meta-Tool | Purpose |
 |-----------|---------|
@@ -29,7 +29,7 @@ Dynamic MCP exposes 7 meta-tools:
 | `airis-route` | Route task to optimal tool chain |
 
 ```
-tools/list → 7 tools × ~200 tokens each = ~1,400 tokens (97% reduction)
+tools/list → 3 tools × ~200 tokens each = ~600 tokens (98% reduction)
 ```
 
 ## Architecture
@@ -38,7 +38,7 @@ tools/list → 7 tools × ~200 tokens each = ~1,400 tokens (97% reduction)
 ┌─────────────────────────────────────────────────────────┐
 │                    LLM Context                          │
 │  ┌─────────────────────────────────────────────────┐    │
-│  │  7 Meta-Tools (1,400 tokens)                     │    │
+│  │  3 Meta-Tools (~600 tokens)                       │    │
 │  │  ├─ airis-find                                  │    │
 │  │  ├─ airis-exec                                  │    │
 │  │  └─ airis-schema                                │    │
@@ -223,7 +223,7 @@ DYNAMIC_MCP=false docker compose up -d
 
 | Aspect | Traditional MCP | Dynamic MCP |
 |--------|-----------------|-------------|
-| Context usage | ~42,000 tokens | ~1,400 tokens |
+| Context usage | ~42,000 tokens | ~600 tokens |
 | Tool discovery | Implicit (all in context) | Embedded in airis-exec description |
 | Server management | Manual enable/disable | Auto-enable on use |
 | Cold start | User waits | Happens during airis-exec |

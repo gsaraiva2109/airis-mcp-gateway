@@ -256,12 +256,18 @@ class DynamicMCP:
         excluded_servers: set[str] | None = None,
         hot_exposed_tools: set[str] | None = None,
         process_manager=None,
+        compact: bool = False,
+        compact_limit: int = 3,
     ) -> str:
         """Build compact tool listing grouped by server for airis-exec description.
 
+        Args:
+            compact: If True, show only top N tools per server with "+M" suffix.
+            compact_limit: Number of tools to show per server in compact mode.
+
         Returns format like:
-            [memory] create_entities, search_nodes, add_observations
-            [tavily] tavily-search, tavily-extract
+            Full:    [memory] create_entities, search_nodes, add_observations, delete_entities, ...
+            Compact: [memory] create_entities, search_nodes, add_observations +4
         """
         excluded = excluded_servers or set()
         hot_tools = hot_exposed_tools or set()
@@ -292,7 +298,12 @@ class DynamicMCP:
         lines = []
         for server_name in sorted(server_tools.keys()):
             tools = sorted(server_tools[server_name])
-            lines.append(f"[{server_name}] {', '.join(tools)}")
+            if compact and len(tools) > compact_limit:
+                shown = ', '.join(tools[:compact_limit])
+                remaining = len(tools) - compact_limit
+                lines.append(f"[{server_name}] {shown} +{remaining}")
+            else:
+                lines.append(f"[{server_name}] {', '.join(tools)}")
 
         return "\n".join(lines)
 
@@ -543,17 +554,18 @@ class DynamicMCP:
             return text
         return text[:max_length - 1] + "…"
 
-    def get_meta_tools(self, tool_listing: str = "") -> list[dict]:
+    def get_meta_tools(self, tool_listing: str = "", mode: str = "core") -> list[dict]:
         """
         Get the meta-tools for Dynamic MCP mode.
 
         Args:
             tool_listing: Compact tool listing to embed in airis-exec description.
                 If provided, airis-exec becomes self-sufficient (no find/schema needed).
+            mode: "core" (3 tools: find/exec/schema) or "full" (all 7 including
+                confidence, repo-index, suggest, route).
 
         Returns:
-            List of tool definitions for airis-find, airis-exec, airis-schema,
-            airis-confidence, airis-repo-index, and airis-suggest
+            List of tool definitions.
         """
         # Build airis-exec description dynamically
         if tool_listing:
@@ -569,7 +581,8 @@ class DynamicMCP:
                 "Use airis-find to discover available tools."
             )
 
-        return [
+        # Core meta-tools (always included)
+        tools = [
             {
                 "name": "airis-find",
                 "description": "Search for available MCP tools and servers by keyword. Use when the tool you need is not listed in airis-exec.",
@@ -619,119 +632,126 @@ class DynamicMCP:
                     "required": ["tool"]
                 }
             },
-            {
-                "name": "airis-confidence",
-                "description": "Pre-implementation confidence check. Assess confidence level before starting implementation to prevent wrong-direction execution. Returns score (0-1), verdict (proceed/present_alternatives/ask_user/stop), and clarifying questions if needed.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "task": {
-                            "type": "string",
-                            "description": "Description of the implementation task"
-                        },
-                        "has_official_docs": {
-                            "type": "boolean",
-                            "description": "Official documentation has been reviewed (+0.2)"
-                        },
-                        "has_existing_patterns": {
-                            "type": "boolean",
-                            "description": "Existing codebase patterns identified (+0.2)"
-                        },
-                        "has_clear_path": {
-                            "type": "boolean",
-                            "description": "Clear implementation path exists (+0.2)"
-                        },
-                        "multiple_approaches": {
-                            "type": "boolean",
-                            "description": "Multiple viable approaches exist (-0.1)"
-                        },
-                        "has_trade_offs": {
-                            "type": "boolean",
-                            "description": "Trade-offs require consideration (-0.1)"
-                        },
-                        "unclear_requirements": {
-                            "type": "boolean",
-                            "description": "Requirements are vague or incomplete (-0.2)"
-                        },
-                        "no_precedent": {
-                            "type": "boolean",
-                            "description": "No similar implementations to reference (-0.2)"
-                        },
-                        "missing_domain_knowledge": {
-                            "type": "boolean",
-                            "description": "Domain expertise is lacking (-0.2)"
+        ]
+
+        # Extended meta-tools (only in "full" mode)
+        if mode == "full":
+            tools.extend([
+                {
+                    "name": "airis-confidence",
+                    "description": "Pre-implementation confidence check. Assess confidence level before starting implementation to prevent wrong-direction execution. Returns score (0-1), verdict (proceed/present_alternatives/ask_user/stop), and clarifying questions if needed.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "task": {
+                                "type": "string",
+                                "description": "Description of the implementation task"
+                            },
+                            "has_official_docs": {
+                                "type": "boolean",
+                                "description": "Official documentation has been reviewed (+0.2)"
+                            },
+                            "has_existing_patterns": {
+                                "type": "boolean",
+                                "description": "Existing codebase patterns identified (+0.2)"
+                            },
+                            "has_clear_path": {
+                                "type": "boolean",
+                                "description": "Clear implementation path exists (+0.2)"
+                            },
+                            "multiple_approaches": {
+                                "type": "boolean",
+                                "description": "Multiple viable approaches exist (-0.1)"
+                            },
+                            "has_trade_offs": {
+                                "type": "boolean",
+                                "description": "Trade-offs require consideration (-0.1)"
+                            },
+                            "unclear_requirements": {
+                                "type": "boolean",
+                                "description": "Requirements are vague or incomplete (-0.2)"
+                            },
+                            "no_precedent": {
+                                "type": "boolean",
+                                "description": "No similar implementations to reference (-0.2)"
+                            },
+                            "missing_domain_knowledge": {
+                                "type": "boolean",
+                                "description": "Domain expertise is lacking (-0.2)"
+                            }
                         }
                     }
+                },
+                {
+                    "name": "airis-repo-index",
+                    "description": "Generate a repository index with structure overview, entry points, documentation, and configuration files. Useful for understanding unfamiliar codebases.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "repo_path": {
+                                "type": "string",
+                                "description": "Path to the repository to index (absolute or relative)"
+                            },
+                            "mode": {
+                                "type": "string",
+                                "enum": ["full", "update", "quick"],
+                                "description": "Indexing mode: 'full' (deep, 6 levels), 'update' (medium, 4 levels), 'quick' (shallow, 2 levels)"
+                            },
+                            "include_docs": {
+                                "type": "boolean",
+                                "description": "Include documentation files (default: true)"
+                            },
+                            "include_tests": {
+                                "type": "boolean",
+                                "description": "Include test directories (default: true)"
+                            },
+                            "max_entries": {
+                                "type": "integer",
+                                "description": "Maximum top-level entries to include (default: 10)"
+                            }
+                        },
+                        "required": ["repo_path"]
+                    }
+                },
+                {
+                    "name": "airis-suggest",
+                    "description": "Suggest appropriate MCP tools based on natural language intent. Analyzes your intent and returns ranked tool suggestions with match scores.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "intent": {
+                                "type": "string",
+                                "description": "Natural language description of what you want to do. Examples: 'create invoice with stripe', 'search for files containing error', 'navigate to a webpage'"
+                            },
+                            "max_results": {
+                                "type": "integer",
+                                "description": "Maximum number of suggestions to return (default: 5)"
+                            }
+                        },
+                        "required": ["intent"]
+                    }
+                },
+                {
+                    "name": "airis-route",
+                    "description": "Route a task to the optimal tool chain. Matches task against known patterns and returns the recommended tool execution order. Faster than airis-find for common workflows.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "task": {
+                                "type": "string",
+                                "description": "Natural language task description. Examples: 'research best practices for React hooks', 'query user table in database', 'create a Stripe invoice'"
+                            },
+                            "max_results": {
+                                "type": "integer",
+                                "description": "Maximum number of additional suggestions to return (default: 5)"
+                            }
+                        },
+                        "required": ["task"]
+                    }
                 }
-            },
-            {
-                "name": "airis-repo-index",
-                "description": "Generate a repository index with structure overview, entry points, documentation, and configuration files. Useful for understanding unfamiliar codebases.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "repo_path": {
-                            "type": "string",
-                            "description": "Path to the repository to index (absolute or relative)"
-                        },
-                        "mode": {
-                            "type": "string",
-                            "enum": ["full", "update", "quick"],
-                            "description": "Indexing mode: 'full' (deep, 6 levels), 'update' (medium, 4 levels), 'quick' (shallow, 2 levels)"
-                        },
-                        "include_docs": {
-                            "type": "boolean",
-                            "description": "Include documentation files (default: true)"
-                        },
-                        "include_tests": {
-                            "type": "boolean",
-                            "description": "Include test directories (default: true)"
-                        },
-                        "max_entries": {
-                            "type": "integer",
-                            "description": "Maximum top-level entries to include (default: 10)"
-                        }
-                    },
-                    "required": ["repo_path"]
-                }
-            },
-            {
-                "name": "airis-suggest",
-                "description": "Suggest appropriate MCP tools based on natural language intent. Analyzes your intent and returns ranked tool suggestions with match scores.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "intent": {
-                            "type": "string",
-                            "description": "Natural language description of what you want to do. Examples: 'create invoice with stripe', 'search for files containing error', 'navigate to a webpage'"
-                        },
-                        "max_results": {
-                            "type": "integer",
-                            "description": "Maximum number of suggestions to return (default: 5)"
-                        }
-                    },
-                    "required": ["intent"]
-                }
-            },
-            {
-                "name": "airis-route",
-                "description": "Route a task to the optimal tool chain. Matches task against known patterns and returns the recommended tool execution order. Faster than airis-find for common workflows.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "task": {
-                            "type": "string",
-                            "description": "Natural language task description. Examples: 'research best practices for React hooks', 'query user table in database', 'create a Stripe invoice'"
-                        },
-                        "max_results": {
-                            "type": "integer",
-                            "description": "Maximum number of additional suggestions to return (default: 5)"
-                        }
-                    },
-                    "required": ["task"]
-                }
-            }
-        ]
+            ])
+
+        return tools
 
 
 # Global singleton
