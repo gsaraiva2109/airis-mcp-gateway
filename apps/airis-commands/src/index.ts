@@ -189,16 +189,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         description: "(Optional) Setup the Infinite Context Bridge. Links NCP discovery and ICM memory to the Airis Gateway for token efficiency and project-specific ranking. Requires NCP and ICM to be installed on the host.",
         inputSchema: {
           type: "object",
-          properties: {
-            link_ncp: {
-              type: "boolean",
-              description: "Register core tools in NCP using the Airis bridge (default: true)",
-            },
-            link_icm: {
-              type: "boolean",
-              description: "Link ICM memory database to RTK context for better ranking (default: true)",
-            },
-          },
+          properties: {},
         },
       },
 

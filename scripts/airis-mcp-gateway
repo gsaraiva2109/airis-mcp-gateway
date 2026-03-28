@@ -58,21 +58,40 @@ case "${1:-help}" in
         fi
         
         # Check API health
-        if ! curl -s --connect-timeout 2 "$API_URL/health" > /dev/null; then
+        if ! curl -fsS --connect-timeout 2 "$API_URL/health" > /dev/null; then
             log_error "Gateway API not reachable at $API_URL. Is it running?"
             exit 1
         fi
-        
-        TMP_FILE=$(mktemp)
-        trap "rm -f $TMP_FILE" EXIT
-        
-        # Wrap in airis-exec unless it's already a meta-tool
-        if [[ "$TOOL_NAME" == airis-* ]] || [[ "$TOOL_NAME" == airis_* ]] || [[ "$TOOL_NAME" == "expandSchema" ]]; then
-            PAYLOAD="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$TOOL_NAME\",\"arguments\":$PARAMS}}"
-        else
-            PAYLOAD="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"airis-exec\",\"arguments\":{\"tool\":\"$TOOL_NAME\",\"arguments\":$PARAMS}}}"
+
+        if ! command -v jq >/dev/null 2>&1; then
+            log_error "jq is not installed. Please install jq to use this tool."
+            exit 1
         fi
-        
+
+        TMP_FILE=$(mktemp)
+        trap 'rm -f "$TMP_FILE"' EXIT
+
+        # Validate that PARAMS is valid JSON
+        if ! echo "$PARAMS" | jq empty >/dev/null 2>&1; then
+            log_error "Invalid JSON passed to --params: $PARAMS"
+            exit 1
+        fi
+
+        # Validate tool name (alphanumeric, hyphens, underscores, colons only)
+        if ! [[ "$TOOL_NAME" =~ ^[a-zA-Z0-9_:/-]+$ ]]; then
+            log_error "Invalid tool name: $TOOL_NAME"
+            exit 1
+        fi
+
+        # Wrap in airis-exec unless it's already a meta-tool; build payload safely with jq
+        if [[ "$TOOL_NAME" == airis-* ]] || [[ "$TOOL_NAME" == airis_* ]] || [[ "$TOOL_NAME" == "expandSchema" ]]; then
+            PAYLOAD=$(jq -n --arg name "$TOOL_NAME" --argjson args "$PARAMS" \
+                '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":$name,"arguments":$args}}')
+        else
+            PAYLOAD=$(jq -n --arg tool "$TOOL_NAME" --argjson args "$PARAMS" \
+                '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"airis-exec","arguments":{"tool":$tool,"arguments":$args}}}')
+        fi
+
         echo "$PAYLOAD" > "$TMP_FILE"
         curl -s -X POST "$API_URL/mcp/" -H "Content-Type: application/json" -d @"$TMP_FILE" | jq -C '.result'
         ;;
@@ -82,10 +101,11 @@ case "${1:-help}" in
         case "${1:-help}" in
             ncp)
                 log_info "Linking servers to NCP..."
-                NCP_BIN="$HOME/.ncp/node_modules/.bin/ncp"
-                if [ ! -f "$NCP_BIN" ]; then log_error "NCP not found at $NCP_BIN"; exit 1; fi
+                NCP_BIN=$(command -v ncp 2>/dev/null || true)
+                if [ -z "$NCP_BIN" ]; then log_error "NCP not found. Install with: npm install -g @portel-dev/ncp"; exit 1; fi
+                SCRIPT_PATH=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
                 for tool in filesystem memory github tavily supabase stripe context7 sequential-thinking serena; do
-                    "$NCP_BIN" add "$tool" "airis-mcp-gateway exec $tool"
+                    "$NCP_BIN" add "$tool" "$SCRIPT_PATH exec $tool"
                 done
                 log_info "NCP bridge complete."
                 ;;

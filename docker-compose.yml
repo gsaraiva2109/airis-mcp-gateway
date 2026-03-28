@@ -122,7 +122,7 @@ services:
       - cache-npm:/home/appuser/.npm       # npm package cache (faster restarts)
       - memory-data:/app/data              # Knowledge graph persistence
       - ${HOME}/.claude:/host-claude:rw
-      - ${HOST_WORKSPACE_DIR:-.}:/workspace/host:rw
+      - ${HOST_WORKSPACE_DIR:-${HOME}/github}:/workspace/host:rw
     depends_on:
       gateway:
         condition: service_healthy
