@@ -625,9 +625,13 @@ async def apply_schema_partitioning(data: Dict[str, Any]) -> Dict[str, Any]:
             excluded_servers=excluded_servers,
             hot_exposed_tools=hot_tool_names,
             process_manager=process_manager,
+            compact=settings.TOOL_LISTING_MODE == "compact",
         )
 
-        tools = list(dynamic_mcp.get_meta_tools(tool_listing=tool_listing))
+        tools = list(dynamic_mcp.get_meta_tools(
+            tool_listing=tool_listing,
+            mode=settings.META_TOOLS_MODE,
+        ))
         meta_count = len(tools)
         tools.extend(hot_tools_list)
 

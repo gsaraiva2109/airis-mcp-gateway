@@ -258,9 +258,19 @@ class TestDynamicMCPToolReference:
 class TestDynamicMCPMetaTools:
     """Tests for meta-tool definitions"""
 
-    def test_get_meta_tools(self, dynamic_mcp):
-        """Test getting meta-tool definitions"""
+    def test_get_meta_tools_core(self, dynamic_mcp):
+        """Test getting core meta-tool definitions (default)"""
         tools = dynamic_mcp.get_meta_tools()
+
+        assert len(tools) == 3
+        tool_names = [t["name"] for t in tools]
+        assert "airis-find" in tool_names
+        assert "airis-exec" in tool_names
+        assert "airis-schema" in tool_names
+
+    def test_get_meta_tools_full(self, dynamic_mcp):
+        """Test getting all meta-tool definitions"""
+        tools = dynamic_mcp.get_meta_tools(mode="full")
 
         assert len(tools) == 7
         tool_names = [t["name"] for t in tools]
@@ -434,9 +444,17 @@ class TestDynamicMCPModeWithHotTools:
 
         return mcp
 
-    def test_meta_tools_count(self, dynamic_mcp):
-        """Meta-tools should include all 7 meta-tools."""
+    def test_meta_tools_count_core(self, dynamic_mcp):
+        """Core mode should include 3 meta-tools."""
         meta_tools = dynamic_mcp.get_meta_tools()
+
+        assert len(meta_tools) == 3
+        names = {t["name"] for t in meta_tools}
+        assert names == {"airis-find", "airis-exec", "airis-schema"}
+
+    def test_meta_tools_count_full(self, dynamic_mcp):
+        """Full mode should include all 7 meta-tools."""
+        meta_tools = dynamic_mcp.get_meta_tools(mode="full")
 
         assert len(meta_tools) == 7
         names = {t["name"] for t in meta_tools}
@@ -462,19 +480,18 @@ class TestDynamicMCPModeWithHotTools:
         assert hot_tool_names.isdisjoint(cold_tool_names)
 
     def test_combined_tools_for_dynamic_mode(self, mcp_with_hot_and_cold):
-        """In Dynamic MCP mode, tools/list should return ONLY meta-tools."""
+        """In Dynamic MCP mode, tools/list should return ONLY core meta-tools."""
         meta_tools = mcp_with_hot_and_cold.get_meta_tools()
 
-        # Dynamic MCP mode: ONLY meta-tools (no HOT tools exposed directly)
-        # All tools (HOT and COLD) are accessed via airis-exec
+        # Dynamic MCP mode: ONLY core meta-tools (no HOT tools exposed directly)
         dynamic_tools = list(meta_tools)
 
-        # Expected: 7 meta-tools ONLY
-        assert len(dynamic_tools) == 7
+        # Expected: 3 core meta-tools ONLY
+        assert len(dynamic_tools) == 3
 
-        # Verify ONLY meta-tools are present
+        # Verify ONLY core meta-tools are present
         tool_names = {t["name"] for t in dynamic_tools}
-        assert tool_names == {"airis-find", "airis-exec", "airis-schema", "airis-confidence", "airis-repo-index", "airis-suggest", "airis-route"}
+        assert tool_names == {"airis-find", "airis-exec", "airis-schema"}
 
         # Verify HOT tools are NOT directly exposed
         assert "gateway_list_servers" not in tool_names
@@ -519,7 +536,7 @@ class TestDynamicMCPModeWithHotTools:
 
         # Dynamic mode: meta-tools ONLY (no HOT tools exposed directly)
         meta_tools = mcp.get_meta_tools()
-        dynamic_tools_count = len(meta_tools)  # 7 meta-tools only
+        dynamic_tools_count = len(meta_tools)  # 3 meta-tools (core mode)
 
         # Token estimate (300 tokens per tool schema)
         full_mode_tokens = all_tools_count * 300  # 31,500 tokens
@@ -710,6 +727,8 @@ class TestApplySchemaPartitioningDynamicMode:
         # Mock settings.DYNAMIC_MCP = True
         mock_settings = MagicMock()
         mock_settings.DYNAMIC_MCP = True
+        mock_settings.META_TOOLS_MODE = "full"
+        mock_settings.TOOL_LISTING_MODE = "full"
 
         # Mock process manager
         mock_pm = MagicMock()
@@ -898,6 +917,29 @@ class TestBuildToolListing:
             process_manager=mock_pm,
         )
         assert result == "[memory] create_entities, search_nodes"
+
+    def test_compact_mode_truncates_tools(self):
+        """Compact mode should show top N tools with +M suffix."""
+        dmc = self._make_dynamic_mcp({
+            "tool_a": ("server1", "A"),
+            "tool_b": ("server1", "B"),
+            "tool_c": ("server1", "C"),
+            "tool_d": ("server1", "D"),
+            "tool_e": ("server1", "E"),
+        })
+        result = dmc.build_tool_listing(compact=True, compact_limit=3)
+        assert "+2" in result
+        # Should contain exactly 3 tool names before the +N
+        assert result.count(",") == 2  # 3 items = 2 commas
+
+    def test_compact_mode_no_truncation_for_small_servers(self):
+        """Compact mode should not truncate servers with <= limit tools."""
+        dmc = self._make_dynamic_mcp({
+            "tool_a": ("server1", "A"),
+            "tool_b": ("server1", "B"),
+        })
+        result = dmc.build_tool_listing(compact=True, compact_limit=3)
+        assert "+" not in result
 
     def test_get_meta_tools_with_listing(self):
         """get_meta_tools should embed tool listing in airis-exec description."""
