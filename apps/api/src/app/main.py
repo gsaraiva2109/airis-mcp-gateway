@@ -385,6 +385,12 @@ async def root_sse_proxy_post(request: Request):
     return await mcp_proxy._proxy_jsonrpc_request(request)
 
 
+@app.api_route("/.well-known/{path:path}", methods=["GET", "HEAD"])
+async def root_well_known_proxy(request: Request, path: str):
+    """Expose streamable HTTP discovery at the application root."""
+    return await mcp_proxy.proxy_root_well_known(request, path)
+
+
 @app.get("/health")
 async def health():
     return {"status": "healthy"}

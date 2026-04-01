@@ -8,6 +8,7 @@ DEFAULT_PROJECT_ROOT = Path(
         os.getenv("PROJECT_ROOT", "/workspace/project")
     )
 )
+DEFAULT_MCP_GATEWAY_URL = os.getenv("MCP_GATEWAY_URL", "http://mcp-gateway:9390")
 DEFAULT_MCP_CONFIG = Path(
     os.getenv("MCP_CONFIG_PATH", str(DEFAULT_PROJECT_ROOT / "mcp-config.json"))
 )
@@ -33,8 +34,11 @@ class Settings(BaseSettings):
     # MCP Gateway
     PROJECT_ROOT: Path = DEFAULT_PROJECT_ROOT
     MCP_CONFIG_PATH: Path = DEFAULT_MCP_CONFIG
-    MCP_GATEWAY_URL: str = os.getenv("MCP_GATEWAY_URL", "http://mcp-gateway:9390")
-    MCP_STREAM_GATEWAY_URL: str = os.getenv("MCP_STREAM_GATEWAY_URL", "http://mcp-gateway:9390/mcp")
+    MCP_GATEWAY_URL: str = DEFAULT_MCP_GATEWAY_URL
+    MCP_STREAM_GATEWAY_URL: str = os.getenv(
+        "MCP_STREAM_GATEWAY_URL",
+        f"{DEFAULT_MCP_GATEWAY_URL.rstrip('/')}/mcp",
+    )
     GATEWAY_PUBLIC_URL: str = os.getenv("GATEWAY_PUBLIC_URL", "http://gateway.localhost:9390")
     GATEWAY_API_URL: str = os.getenv("GATEWAY_API_URL", "http://localhost:9400/api")
     UI_PUBLIC_URL: str = os.getenv("UI_PUBLIC_URL", "http://ui.gateway.localhost:5273")

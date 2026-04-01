@@ -10,6 +10,10 @@ from typing import Any, AsyncGenerator, Dict, Optional
 import httpx
 import json
 import asyncio
+from dataclasses import dataclass, field
+from contextlib import suppress
+from urllib.parse import urlparse, parse_qs
+import uuid
 from ...core.schema_partitioning import schema_partitioner
 from ...core.config import settings
 from ...core.protocol_logger import protocol_logger
@@ -78,6 +82,8 @@ import time as _time_module
 _session_response_queues: dict[str, tuple[asyncio.Queue, float]] = {}
 _session_queues_lock = asyncio.Lock()
 _SESSION_QUEUE_TTL_SECONDS = 3600  # 1 hour
+_stream_bridge_sessions: dict[str, "StreamBridgeSession"] = {}
+_stream_bridge_lock = asyncio.Lock()
 
 
 async def get_response_queue(session_id: str) -> asyncio.Queue:
@@ -299,6 +305,280 @@ class SSEEventBuffer:
             self.buffer = []
             return complete_event
         return None
+
+
+@dataclass
+class StreamBridgeSession:
+    """Bridges a Streamable HTTP client session onto a Gateway SSE session."""
+
+    public_session_id: str
+    backend_session_id: str
+    client: httpx.AsyncClient
+    stream_context: Any
+    stream_response: httpx.Response
+    response_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+    closed: bool = False
+    reader_task: Optional[asyncio.Task] = None
+
+    async def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        if self.reader_task is not None:
+            self.reader_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self.reader_task
+        await self.stream_response.aclose()
+        await self.stream_context.__aexit__(None, None, None)
+        await self.client.aclose()
+
+
+def _stream_session_header_name() -> str:
+    return "Mcp-Session-Id"
+
+
+def _get_stream_session_id(request: Request) -> Optional[str]:
+    return request.headers.get(_stream_session_header_name())
+
+
+def _extract_gateway_session_id(endpoint_url: str) -> Optional[str]:
+    parsed = urlparse(endpoint_url)
+    session_ids = parse_qs(parsed.query).get("sessionid")
+    if session_ids:
+        return session_ids[0]
+    return None
+
+
+def _get_response_message_id(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return None
+    if "id" in payload:
+        return payload.get("id")
+    if payload.get("method") == "notifications/initialized":
+        return "__initialized__"
+    return None
+
+
+async def _transform_gateway_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply the same response shaping used by the SSE proxy to JSON payloads."""
+    if isinstance(payload, dict) and "result" in payload and "tools" in payload.get("result", {}):
+        payload = await apply_schema_partitioning(payload)
+
+    if isinstance(payload, dict) and "result" in payload and "prompts" in payload.get("result", {}):
+        payload = await apply_prompts_merging(payload)
+
+    is_initialize_response = (
+        isinstance(payload, dict) and
+        "result" in payload and
+        isinstance(payload.get("result"), dict) and
+        "protocolVersion" in payload.get("result", {})
+    )
+    if is_initialize_response:
+        from ...core.mcp_config_loader import load_mcp_config
+        server_configs = load_mcp_config()
+        payload["result"]["instructions"] = compile_instructions(server_configs)
+
+    return payload
+
+
+async def _stream_bridge_reader(session: StreamBridgeSession) -> None:
+    """Read Gateway SSE events and fan out JSON-RPC payloads to the bridge queue."""
+    pending_lines: list[str] = []
+    try:
+        async for raw_line in session.stream_response.aiter_lines():
+            line = raw_line.strip()
+            if line == "":
+                payload = _parse_sse_json(pending_lines)
+                pending_lines = []
+                if payload is None:
+                    continue
+                transformed = await _transform_gateway_payload(payload)
+                await session.response_queue.put(transformed)
+            else:
+                pending_lines.append(line)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning("Stream bridge reader stopped for %s: %s", session.public_session_id, exc)
+    finally:
+        if pending_lines:
+            payload = _parse_sse_json(pending_lines)
+            if payload is not None:
+                transformed = await _transform_gateway_payload(payload)
+                await session.response_queue.put(transformed)
+        await session.response_queue.put({
+            "jsonrpc": "2.0",
+            "error": {"code": -32000, "message": "Gateway SSE bridge disconnected"},
+        })
+
+
+async def _open_stream_bridge_session() -> StreamBridgeSession:
+    """Create a persistent bridge session for Streamable HTTP clients."""
+    client = httpx.AsyncClient(timeout=STREAM_TIMEOUT)
+    gateway_sse_url = f"{settings.MCP_GATEWAY_URL.rstrip('/')}/sse"
+    stream_context = client.stream(
+        "GET",
+        gateway_sse_url,
+        headers={"Accept": "text/event-stream"},
+    )
+    try:
+        stream_response = await stream_context.__aenter__()
+        backend_session_id: Optional[str] = None
+        async for raw_line in stream_response.aiter_lines():
+            line = raw_line.strip()
+            if not line.startswith("data:"):
+                continue
+            data_str = line[5:].strip()
+            if data_str.startswith("{") or data_str.startswith("["):
+                continue
+            backend_session_id = _extract_gateway_session_id(data_str)
+            if backend_session_id:
+                break
+        if not backend_session_id:
+            raise RuntimeError("Gateway did not provide an SSE session id")
+
+        session = StreamBridgeSession(
+            public_session_id=f"airis-{uuid.uuid4().hex}",
+            backend_session_id=backend_session_id,
+            client=client,
+            stream_context=stream_context,
+            stream_response=stream_response,
+        )
+        session.reader_task = asyncio.create_task(_stream_bridge_reader(session))
+        return session
+    except Exception:
+        await stream_context.__aexit__(None, None, None)
+        await client.aclose()
+        raise
+
+
+async def _get_or_create_stream_bridge_session(request: Request, *, create: bool) -> Optional[StreamBridgeSession]:
+    public_session_id = _get_stream_session_id(request)
+    if public_session_id:
+        async with _stream_bridge_lock:
+            return _stream_bridge_sessions.get(public_session_id)
+    if not create:
+        return None
+    session = await _open_stream_bridge_session()
+    async with _stream_bridge_lock:
+        _stream_bridge_sessions[session.public_session_id] = session
+    return session
+
+
+async def _close_stream_bridge_session(public_session_id: str) -> None:
+    async with _stream_bridge_lock:
+        session = _stream_bridge_sessions.pop(public_session_id, None)
+    if session is not None:
+        await session.close()
+
+
+async def _send_via_stream_bridge(
+    request: Request,
+    rpc_request: Dict[str, Any],
+) -> Response:
+    create_session = rpc_request.get("method") == "initialize"
+    try:
+        session = await _get_or_create_stream_bridge_session(request, create=create_session)
+    except Exception as exc:
+        logger.error("Failed to open stream bridge session: %s", exc)
+        return Response(
+            content=json.dumps({
+                "jsonrpc": "2.0",
+                "id": rpc_request.get("id"),
+                "error": {"code": -32000, "message": f"Failed to open Gateway session: {exc}"},
+            }),
+            status_code=502,
+            media_type="application/json",
+        )
+    if session is None:
+        return Response(
+            content=json.dumps({
+                "jsonrpc": "2.0",
+                "id": rpc_request.get("id"),
+                "error": {"code": -32001, "message": "Unknown or expired MCP session"},
+            }),
+            status_code=400,
+            media_type="application/json",
+        )
+
+    target_url = f"{settings.MCP_GATEWAY_URL.rstrip('/')}/sse?sessionid={session.backend_session_id}"
+    expected_id = _get_response_message_id(rpc_request)
+
+    try:
+        response = await session.client.post(
+            target_url,
+            json=rpc_request,
+            headers={"Content-Type": "application/json"},
+        )
+    except Exception as exc:
+        logger.error("Failed to send bridged request to Gateway: %s", exc)
+        return Response(
+            content=json.dumps({
+                "jsonrpc": "2.0",
+                "id": rpc_request.get("id"),
+                "error": {"code": -32000, "message": f"Failed to reach Gateway session: {exc}"},
+            }),
+            status_code=502,
+            media_type="application/json",
+            headers={_stream_session_header_name(): session.public_session_id},
+        )
+    if response.status_code not in (200, 202):
+        return Response(
+            content=response.text,
+            status_code=response.status_code,
+            media_type=response.headers.get("content-type"),
+        )
+
+    if "id" not in rpc_request:
+        return Response(status_code=202, headers={_stream_session_header_name(): session.public_session_id})
+
+    while True:
+        try:
+            payload = await asyncio.wait_for(
+                session.response_queue.get(),
+                timeout=settings.TOOL_CALL_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            return Response(
+                content=json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": rpc_request.get("id"),
+                    "error": {"code": -32001, "message": "Timed out waiting for Gateway response"},
+                }),
+                status_code=504,
+                media_type="application/json",
+                headers={_stream_session_header_name(): session.public_session_id},
+            )
+        if (
+            isinstance(payload, dict) and
+            payload.get("error", {}).get("message") == "Gateway SSE bridge disconnected"
+        ):
+            await _close_stream_bridge_session(session.public_session_id)
+            return Response(
+                content=json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": rpc_request.get("id"),
+                    "error": {"code": -32000, "message": "Gateway session disconnected"},
+                }),
+                status_code=502,
+                media_type="application/json",
+            )
+
+        if expected_id is None or _get_response_message_id(payload) == expected_id:
+            return Response(
+                content=json.dumps(payload),
+                status_code=200,
+                media_type="application/json",
+                headers={_stream_session_header_name(): session.public_session_id},
+            )
+
+
+async def _delete_stream_bridge_session(request: Request) -> Response:
+    public_session_id = _get_stream_session_id(request)
+    if not public_session_id:
+        return Response(status_code=204)
+    await _close_stream_bridge_session(public_session_id)
+    return Response(status_code=204)
 
 
 async def proxy_sse_stream(request: Request):
@@ -1283,11 +1563,8 @@ async def _proxy_jsonrpc_request(request: Request) -> Response:
 
     # Proxy all other tool calls to Gateway
     if not session_id:
-        # RMCP streamable_http clients (Codex) expect streaming responses.
-        return await _proxy_streaming_gateway_request(
-            request,
-            initialize_request_id=rpc_request.get("id") if is_initialize_request else None,
-        )
+        # Streamable HTTP clients (Codex) are bridged onto the existing SSE backend.
+        return await _send_via_stream_bridge(request, rpc_request)
 
     target_url = _build_gateway_jsonrpc_url(request)
     forward_headers = {"Content-Type": "application/json"}
@@ -1341,6 +1618,13 @@ async def mcp_http_health_check():
 async def mcp_http_health_check_head():
     """HEAD variant for Streamable HTTP transport."""
     return Response(status_code=204)
+
+
+@router.delete("", include_in_schema=False)
+@router.delete("/", include_in_schema=False)
+async def mcp_stream_delete(request: Request):
+    """Allow Streamable HTTP clients to end a bridged session."""
+    return await _delete_stream_bridge_session(request)
 
 
 @router.post("", include_in_schema=False)
