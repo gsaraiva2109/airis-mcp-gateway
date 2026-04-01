@@ -5,7 +5,7 @@
 <h1 align="center">Universal MCP Hub: AIRIS MCP Gateway</h1>
 
 <p align="center">
-  <em>One gateway. 100+ AI tools. Every AI client. <b>Connect once, use everywhere.</b></em>
+  <em>The observability-first gateway for all your MCP tools. <b>Connect once, evaluate everywhere.</b></em>
 </p>
 
 <p align="center">
@@ -28,27 +28,27 @@ Register the gateway once, and access all backend MCP servers (Stripe, Supabase,
 
 | Client | Connection Command / Setup |
 | :--- | :--- |
-| **Claude Code** | `claude mcp add --transport sse airis http://localhost:8000/sse` |
+| **Codex** | `codex mcp add airis http://localhost:8000/sse` |
+| **Claude Code** | `claude mcp add airis http://localhost:8000/sse` |
 | **Gemini CLI** | `gemini mcp add --transport sse airis http://localhost:8000/sse` |
 | **Cursor** | Settings > Features > MCP > **Add New MCP Server**<br>Name: `airis`, Type: `SSE`, URL: `http://localhost:8000/sse` |
 | **Windsurf** | Add SSE URL `http://localhost:8000/sse` to `~/.codeium/config.json` |
-| **Zed** | Add `http://localhost:8000/sse` to `extensions.mcp` in `settings.json` |
 
 ---
 
 ## 🧠 Why Universal MCP Hub?
 
-### 1. Single Source of Truth
-No more repeating API keys and server configs across different projects or AI tools. Manage all secrets in one place (`mcp-config.json`) and share them across Claude Code, Gemini CLI, Cursor, and more.
+### 1. Observability-First (Moving beyond "Vibes")
+Stop guessing if your toolset is actually helping. Airis tracks and visualizes real performance, providing the same observability found in platforms like Codex (OTel ready):
+- **Token Efficiency**: Measurable reduction in initial context overhead.
+- **Workflow Precision**: Tracking **Steps-to-Success (StS)** for complex tasks.
+- **Latency & Reliability**: Real-time monitoring of each MCP server's health, latency, and success rates.
 
 ### 2. Intelligent Noise Reduction
-Even with large context windows, exposing 100+ tools simultaneously leads to "tool selection hallucinations." Airis provides **`airis-find`** to dynamically help models discover only the tools they need, reducing inference noise and improving success rates.
+Even with large context windows, exposing 100+ tools simultaneously leads to "tool selection hallucinations." Airis provides **`airis-find`** to dynamically help models discover only the tools they need, reducing inference noise and improving reasoning accuracy.
 
-### 3. Performance & Evaluation (Moving beyond "Vibes")
-Stop guessing if your toolset is actually helping. Airis tracks and visualizes real performance:
-- **Token Efficiency**: Measurable reduction in initial context overhead.
-- **Workflow Precision**: Tracking steps-to-success for complex tasks.
-- **Latency & Reliability**: Real-time monitoring of each MCP server's health and response time.
+### 3. Single Source of Truth
+No more repeating API keys and server configs across different projects or AI tools. Manage all secrets in one place (`mcp-config.json`) and share them across Claude Code, Gemini CLI, Cursor, and more.
 
 ## How It Works
 
