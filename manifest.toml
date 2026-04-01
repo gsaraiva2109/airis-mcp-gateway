@@ -1,0 +1,21 @@
+[workspace]
+name = "airis-mcp-gateway"
+version_file = "VERSION"
+
+[[packages]]
+name = "api"
+path = "apps/api"
+type = "python"
+version_file = "pyproject.toml"
+
+[[packages]]
+name = "commands"
+path = "apps/airis-commands"
+type = "node"
+version_file = "package.json"
+
+[[packages]]
+name = "gateway-control"
+path = "apps/gateway-control"
+type = "node"
+version_file = "package.json"

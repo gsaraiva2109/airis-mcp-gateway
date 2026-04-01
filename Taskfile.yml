@@ -23,23 +23,30 @@ includes:
 
 tasks:
   version:sync:
-    desc: Sync all package versions from root VERSION file (Single Source of Truth)
+    desc: Sync all package versions from root VERSION file (Airis Monorepo pattern)
     cmds:
       - |
+        # Use manifest.toml to drive the sync process
         VERSION=$(cat VERSION | tr -d '[:space:]')
-        echo "🔄 Syncing version: $VERSION"
-        # Node.js (package.json)
-        for f in apps/*/package.json; do
+        echo "🔄 Airis Monorepo Sync: $VERSION"
+
+        # Node.js packages (from manifest.toml)
+        # We look for all entries with type="node"
+        grep -B 2 'type = "node"' manifest.toml | grep 'path = ' | sed 's/path = "//;s/"//' | while read -r p; do
+          f="$p/package.json"
           if [ -f "$f" ]; then
             sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" "$f" && rm "$f.bak"
-            echo "✅ Updated $f"
+            echo "✅ Updated Node: $f"
           fi
         done
-        # Python (pyproject.toml)
-        for f in apps/*/pyproject.toml; do
+
+        # Python packages (from manifest.toml)
+        # We look for all entries with type="python"
+        grep -B 2 'type = "python"' manifest.toml | grep 'path = ' | sed 's/path = "//;s/"//' | while read -r p; do
+          f="$p/pyproject.toml"
           if [ -f "$f" ]; then
             sed -i.bak "s/version = \".*\"/version = \"$VERSION\"/" "$f" && rm "$f.bak"
-            echo "✅ Updated $f"
+            echo "✅ Updated Python: $f"
           fi
         done
 
