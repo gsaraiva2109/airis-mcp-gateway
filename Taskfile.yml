@@ -22,6 +22,27 @@ includes:
     optional: false
 
 tasks:
+  version:sync:
+    desc: Sync all package versions from root VERSION file (Single Source of Truth)
+    cmds:
+      - |
+        VERSION=$(cat VERSION | tr -d '[:space:]')
+        echo "🔄 Syncing version: $VERSION"
+        # Node.js (package.json)
+        for f in apps/*/package.json; do
+          if [ -f "$f" ]; then
+            sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" "$f" && rm "$f.bak"
+            echo "✅ Updated $f"
+          fi
+        done
+        # Python (pyproject.toml)
+        for f in apps/*/pyproject.toml; do
+          if [ -f "$f" ]; then
+            sed -i.bak "s/version = \".*\"/version = \"$VERSION\"/" "$f" && rm "$f.bak"
+            echo "✅ Updated $f"
+          fi
+        done
+
   default:
     desc: Show available tasks
     cmds:
