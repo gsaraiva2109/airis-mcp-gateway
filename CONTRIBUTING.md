@@ -137,6 +137,22 @@ See [Configuration Guide](./docs/configuration.md) for TTL settings and advanced
 - [ ] Are tests included?
 - [ ] Is documentation updated?
 
+## Versioning
+
+This project uses a **Single Source of Truth (SoT)** for versioning to avoid drift across multiple languages and packages.
+
+1.  **Truth Source**: The root `VERSION` file (e.g., `1.1.0`).
+2.  **Synchronization**: All sub-packages (`apps/api/pyproject.toml`, `apps/*/package.json`) must be kept in sync with the root `VERSION` file.
+3.  **Release Trigger**: Releases are managed by GitHub Actions based on Git tags (`v*`).
+
+**To bump the version:**
+1.  Update the root `VERSION` file.
+2.  Update `version` in `apps/api/pyproject.toml`.
+3.  Update `version` in `apps/*/package.json`.
+4.  Commit with a prefix (e.g., `feat:`, `fix:`) to trigger the appropriate auto-bump in the CI/CD pipeline.
+
+---
+
 ## Commit Convention
 
 ```
