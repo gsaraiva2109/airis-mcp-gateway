@@ -28,7 +28,7 @@ Register the gateway once, and access all backend MCP servers (Stripe, Supabase,
 
 | Client | Connection Command / Setup |
 | :--- | :--- |
-| **Codex** | `codex mcp add airis http://localhost:8000/sse` |
+| **Codex** | `codex mcp add airis-mcp-gateway --url http://localhost:9400/mcp` |
 | **Claude Code** | `claude mcp add airis http://localhost:8000/sse` |
 | **Gemini CLI** | `gemini mcp add --transport sse airis http://localhost:8000/sse` |
 | **Cursor** | Settings > Features > MCP > **Add New MCP Server**<br>Name: `airis`, Type: `SSE`, URL: `http://localhost:8000/sse` |

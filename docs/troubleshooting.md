@@ -40,6 +40,20 @@ docker compose logs api | grep -i memory
 
 ## Common Issues
 
+### "MCP startup incomplete" or "decoding response body" in Codex
+
+Codex should connect to the Streamable HTTP endpoint, not the SSE endpoint.
+
+```bash
+# Remove the broken SSE registration if needed
+codex mcp remove airis-mcp-gateway
+
+# Re-add AIRIS using the Streamable HTTP endpoint
+codex mcp add airis-mcp-gateway --url http://localhost:9400/mcp
+```
+
+If you register `http://localhost:9400/sse` in Codex, Codex can fail during the `initialize` request because `/sse` is for SSE clients, while Codex expects the HTTP MCP endpoint at `/mcp`.
+
 ### "Server not found"
 
 ```bash
