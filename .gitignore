@@ -68,3 +68,6 @@ secrets.json
 
 # Casks (local macOS app builds)
 Casks/
+
+# Git worktrees
+.worktrees/
