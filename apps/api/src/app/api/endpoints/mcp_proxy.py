@@ -44,6 +44,7 @@ WRITE_TIMEOUT = 10.0
 POOL_TIMEOUT = 10.0
 SSE_KEEPALIVE_INTERVAL = 30.0
 INIT_CLIENT_TIMEOUT = 30.0
+STREAM_BRIDGE_READY_DELAY = 0.3
 
 # Track initialized sessions for auto-init fallback
 _initialized_sessions: set[str] = set()
@@ -319,6 +320,7 @@ class StreamBridgeSession:
     response_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     closed: bool = False
     reader_task: Optional[asyncio.Task] = None
+    created_at: float = field(default_factory=_time_module.monotonic)
 
     async def close(self) -> None:
         if self.closed:
@@ -500,6 +502,12 @@ async def _send_via_stream_bridge(
             status_code=400,
             media_type="application/json",
         )
+
+    # The Docker Gateway can briefly reject the first POST after the SSE stream
+    # opens with "session not found". Let the backend session settle first.
+    session_age = _time_module.monotonic() - session.created_at
+    if session_age < STREAM_BRIDGE_READY_DELAY:
+        await asyncio.sleep(STREAM_BRIDGE_READY_DELAY - session_age)
 
     target_url = f"{settings.MCP_GATEWAY_URL.rstrip('/')}/sse?sessionid={session.backend_session_id}"
     expected_id = _get_response_message_id(rpc_request)
