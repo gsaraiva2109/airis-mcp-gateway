@@ -71,3 +71,12 @@ Casks/
 
 # Git worktrees
 .worktrees/
+
+# Gemini CLI
+.gemini/
+
+# Binary artifacts
+mcp-publisher
+
+# Lock files (pnpm-lock managed per workspace)
+apps/*/pnpm-lock.yaml
