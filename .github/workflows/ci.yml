@@ -74,7 +74,7 @@ jobs:
       - name: Security scan (bandit)
         run: |
           pip install bandit
-          bandit -r apps/api/src -ll -ii || true
+          bandit -r apps/api/src -ll -ii
 
   # TypeScript build and test (only when TS files change)
   build-typescript:

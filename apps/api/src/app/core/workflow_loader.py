@@ -1,8 +1,8 @@
-"""Workflow Loader — loads and validates workflow YAML recipes.
+"""Workflow Loader — loads workflow YAML files as confirmed-text directives.
 
-Reads workflow definitions from workflows/ directory and produces
-validated WorkflowConfig objects for behavior_compiler to compile
-into MCP instructions.
+Reads workflow definitions from workflows/ directory. Each YAML file contains
+human-written confirmed text that is output verbatim into MCP instructions.
+No template engine or variable expansion — what you write is what gets emitted.
 """
 
 from __future__ import annotations
@@ -21,29 +21,27 @@ logger = get_logger(__name__)
 _PRIORITY_VALUES = {"high", "medium", "low"}
 _KEBAB_CASE_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
+# Priority sort order (shared with behavior_compiler)
+PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+
 
 @dataclass
 class WorkflowConfig:
-    """Parsed workflow recipe configuration."""
+    """Parsed workflow configuration.
+
+    Attributes:
+        name: Kebab-case identifier for the workflow.
+        compile_to: Target for compilation (e.g., "mcp_instructions").
+        priority: Importance level — high/medium/low.
+        text: Confirmed text content, emitted verbatim.
+        servers: Optional list of server names this workflow covers.
+    """
 
     name: str
-    description: str
+    compile_to: str  # target type: "mcp_instructions"
     priority: str  # "high" | "medium" | "low"
-    max_tokens: int
-    servers: list[str]
-    trigger: str
-    compile_to: str
-
-
-def estimate_tokens(text: str) -> int:
-    """Estimate token count for a text string.
-
-    ASCII characters: ~4 chars per token.
-    Non-ASCII characters (Japanese, etc.): ~2 chars per token.
-    """
-    ascii_chars = sum(1 for c in text if ord(c) < 128)
-    non_ascii_chars = len(text) - ascii_chars
-    return (ascii_chars // 4) + (non_ascii_chars // 2)
+    text: str  # confirmed text, emitted verbatim
+    servers: list[str] = field(default_factory=list)
 
 
 def load_workflows(workflows_dir: Optional[Path] = None) -> list[WorkflowConfig]:
@@ -73,7 +71,6 @@ def load_workflows(workflows_dir: Optional[Path] = None) -> list[WorkflowConfig]
         logger.debug("No workflows/ directory found, skipping workflow loading")
         return []
 
-    priority_order = {"high": 0, "medium": 1, "low": 2}
     workflows: list[tuple[int, str, WorkflowConfig]] = []
 
     for yaml_path in sorted(workflows_dir.glob("*.yaml")):
@@ -90,21 +87,19 @@ def load_workflows(workflows_dir: Optional[Path] = None) -> list[WorkflowConfig]
 
         config = WorkflowConfig(
             name=raw.get("name", ""),
-            description=raw.get("description", ""),
-            priority=raw.get("priority", "medium"),
-            max_tokens=raw.get("max_tokens", 200),
-            servers=raw.get("servers", []),
-            trigger=raw.get("trigger", ""),
             compile_to=raw.get("compile_to", ""),
+            priority=raw.get("priority", "medium"),
+            text=raw.get("text", ""),
+            servers=raw.get("servers", []),
         )
 
-        errors = validate_workflow(config)
+        errors = _validate(config)
         if errors:
             for error in errors:
                 logger.error(f"Workflow '{yaml_path.name}': {error}")
             continue
 
-        order = priority_order.get(config.priority, 1)
+        order = PRIORITY_ORDER.get(config.priority, 1)
         workflows.append((order, yaml_path.name, config))
 
     workflows.sort(key=lambda x: (x[0], x[1]))
@@ -114,7 +109,7 @@ def load_workflows(workflows_dir: Optional[Path] = None) -> list[WorkflowConfig]
     return loaded
 
 
-def validate_workflow(config: WorkflowConfig) -> list[str]:
+def _validate(config: WorkflowConfig) -> list[str]:
     """Validate a workflow configuration.
 
     Returns:
@@ -130,16 +125,10 @@ def validate_workflow(config: WorkflowConfig) -> list[str]:
     if config.priority not in _PRIORITY_VALUES:
         errors.append(f"'priority' must be high/medium/low, got '{config.priority}'")
 
-    if not config.compile_to or not config.compile_to.strip():
-        errors.append("'compile_to' is required and must not be empty")
-    else:
-        token_estimate = estimate_tokens(config.compile_to)
-        if token_estimate > config.max_tokens:
-            errors.append(
-                f"'compile_to' exceeds max_tokens: estimated {token_estimate} > limit {config.max_tokens}"
-            )
+    if not config.compile_to:
+        errors.append("'compile_to' is required")
 
-    if not config.servers:
-        errors.append("'servers' is required and must not be empty")
+    if not config.text or not config.text.strip():
+        errors.append("'text' is required and must not be empty")
 
     return errors

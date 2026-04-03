@@ -12,18 +12,12 @@ from typing import TYPE_CHECKING
 
 from .logging import get_logger
 from .routing_engine import format_routing_table_as_instructions
-from .workflow_loader import WorkflowConfig, estimate_tokens, load_workflows
+from .workflow_loader import PRIORITY_ORDER, WorkflowConfig, load_workflows
 
 if TYPE_CHECKING:
     from .mcp_config_loader import McpServerConfig
 
 logger = get_logger(__name__)
-
-# Priority sort order
-_PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
-
-# Token budget for the workflow directives section
-_WORKFLOW_TOKEN_BUDGET = 800
 
 # Base instructions (always included)
 _BASE_INSTRUCTIONS = (
@@ -59,13 +53,6 @@ _TOOL_ROUTING_GUIDE = (
     "host-dependent → plugin/skill/CLI | simple file ops → native tools."
 )
 
-_FALLBACK_SECTION = (
-    "## Tool Discovery Fallback\n"
-    "If your task requires capabilities NOT covered by the Required Workflows above,\n"
-    "you MUST call airis-find with keywords describing what you need before attempting the task.\n"
-    "Do NOT proceed without checking available tools first."
-)
-
 def compile_instructions(server_configs: dict[str, McpServerConfig]) -> str:
     """Compile workflows and behavior specs into instructions string.
 
@@ -80,21 +67,9 @@ def compile_instructions(server_configs: dict[str, McpServerConfig]) -> str:
     """
     workflows = load_workflows()
 
-    sections = [_BASE_INSTRUCTIONS, _META_TOOLS_SECTION, _TOOL_ROUTING_GUIDE]
-
-    # Compile workflow directives
-    workflow_section = _compile_workflow_section(workflows)
-    if workflow_section:
-        sections.append(workflow_section)
-
-    # Add fallback directive (always, if we have workflows)
-    if workflows:
-        sections.append(_FALLBACK_SECTION)
-
-    # Auto-generate server list for airis-find
-    server_list = _compile_server_list(server_configs)
-    if server_list:
-        sections.append(server_list)
+    # Use workflow texts if available, otherwise fall back to hardcoded constant
+    workflow_text = _compile_workflow_texts(workflows)
+    sections = [_BASE_INSTRUCTIONS, _META_TOOLS_SECTION, workflow_text or _TOOL_ROUTING_GUIDE]
 
     # Servers covered by workflows are excluded from behavior lines
     workflow_servers = set()
@@ -113,54 +88,21 @@ def compile_instructions(server_configs: dict[str, McpServerConfig]) -> str:
     return "\n\n".join(sections)
 
 
-def _compile_workflow_section(workflows: list[WorkflowConfig]) -> str:
-    """Compile workflow directives into the Required Workflows section.
+def _compile_workflow_texts(workflows: list[WorkflowConfig]) -> str:
+    """Compile workflow confirmed texts into a single string.
 
-    Includes workflows in priority order until token budget is exhausted.
-    High priority workflows are always included. Medium/low are included
-    if budget permits.
+    Filters for compile_to: mcp_instructions, joins in priority order.
+    Text is emitted verbatim — no template engine or variable expansion.
 
     Returns:
-        Compiled workflow section string, or empty string if no workflows.
+        Compiled text, or empty string if no matching workflows.
     """
-    if not workflows:
-        return ""
-
-    header = "## Required Workflows\nYou MUST follow these workflows. They are directives, not suggestions.\n"
-    parts = [header]
-    total_tokens = estimate_tokens(header)
-
+    texts = []
     for wf in workflows:
-        wf_tokens = estimate_tokens(wf.compile_to)
+        if wf.compile_to == "mcp_instructions" and wf.text.strip():
+            texts.append(wf.text.strip())
 
-        if wf.priority == "high":
-            # High priority: always include
-            parts.append(wf.compile_to.strip())
-            total_tokens += wf_tokens
-        elif total_tokens + wf_tokens <= _WORKFLOW_TOKEN_BUDGET:
-            # Medium/low: include if budget permits
-            parts.append(wf.compile_to.strip())
-            total_tokens += wf_tokens
-        else:
-            logger.warning(
-                f"Workflow '{wf.name}' (priority={wf.priority}) skipped: "
-                f"token budget exhausted ({total_tokens}/{_WORKFLOW_TOKEN_BUDGET})"
-            )
-
-    return "\n\n".join(parts)
-
-
-def _compile_server_list(server_configs: dict[str, McpServerConfig]) -> str:
-    """Generate available servers list from mcp-config.json.
-
-    Includes all server names (including disabled) so LLMs know
-    what's available via airis-find.
-    """
-    if not server_configs:
-        return ""
-
-    names = sorted(server_configs.keys())
-    return "## Available Servers\n" + ", ".join(names)
+    return "\n\n".join(texts)
 
 
 def _compile_behavior_lines(
@@ -195,7 +137,7 @@ def _compile_behavior_lines(
         if not behavior.triggers or not behavior.instruction:
             continue
 
-        priority_order = _PRIORITY_ORDER.get(behavior.priority, 1)
+        priority_order = PRIORITY_ORDER.get(behavior.priority, 1)
 
         # Determine tool reference format based on mode
         if config.enabled and config.mode == ServerMode.HOT:
