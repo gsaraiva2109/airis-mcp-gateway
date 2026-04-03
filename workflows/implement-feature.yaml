@@ -1,13 +1,13 @@
 name: implement-feature
-description: "Enforce official docs lookup before writing any library/API code"
+compile_to: mcp_instructions
 priority: high
-max_tokens: 250
 servers:
   - context7
 
-trigger: "implementing with any library, framework, or external API"
+text: |
+  ## Required Workflows
+  You MUST follow these workflows. They are directives, not suggestions.
 
-compile_to: |
   ### Implementing with Libraries/APIs
   WHEN writing code that uses ANY library, framework, or external API:
   1. FIRST: Call context7:resolve-library-id to identify the library

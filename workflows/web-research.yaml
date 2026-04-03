@@ -1,13 +1,10 @@
 name: web-research
-description: "Use web search for current information and best practices"
+compile_to: mcp_instructions
 priority: high
-max_tokens: 120
 servers:
   - tavily
 
-trigger: "need current information, external data, or best practices"
-
-compile_to: |
+text: |
   ### Web Research
   WHEN you need current information, external data, or best practices:
   1. Call tavily:tavily-search with a focused search query

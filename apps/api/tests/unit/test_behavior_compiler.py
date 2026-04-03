@@ -8,10 +8,8 @@ Tests cover:
 - Priority sorting (high > medium > low)
 - Disabled servers with behavior (included for auto-enable)
 - Routing table integration (Quick Routes section)
-- Workflow directive compilation and integration
+- Workflow text compilation and integration
 - Behavior exclusion for workflow-covered servers
-- Server list auto-generation
-- Token budget enforcement for workflows
 """
 
 import pytest
@@ -20,11 +18,9 @@ from unittest.mock import patch
 from app.core.behavior_compiler import (
     compile_instructions,
     _compile_behavior_lines,
-    _compile_workflow_section,
-    _compile_server_list,
+    _compile_workflow_texts,
     _BASE_INSTRUCTIONS,
     _META_TOOLS_SECTION,
-    _FALLBACK_SECTION,
 )
 from app.core.mcp_config_loader import (
     McpServerConfig,
@@ -294,108 +290,75 @@ class TestCompileBehaviorLines:
 
 def _make_workflow(
     name: str = "test-workflow",
+    compile_to: str = "mcp_instructions",
     priority: str = "high",
+    text: str = "WHEN test: do something",
     servers: list[str] | None = None,
-    compile_to: str = "WHEN test: do something",
 ) -> WorkflowConfig:
     """Helper to create WorkflowConfig for tests."""
     return WorkflowConfig(
         name=name,
-        description="Test workflow",
-        priority=priority,
-        max_tokens=200,
-        servers=servers or ["test-server"],
-        trigger="test",
         compile_to=compile_to,
+        priority=priority,
+        text=text,
+        servers=servers or ["test-server"],
     )
 
 
-class TestCompileWorkflowSection:
-    """Test workflow directive compilation."""
+class TestCompileWorkflowTexts:
+    """Test workflow text compilation."""
 
     def test_empty_workflows(self):
-        assert _compile_workflow_section([]) == ""
+        assert _compile_workflow_texts([]) == ""
 
     def test_single_workflow(self):
-        workflows = [_make_workflow(compile_to="### Test\nWHEN test: do it")]
-        result = _compile_workflow_section(workflows)
+        workflows = [_make_workflow(text="### Test\nWHEN test: do it")]
+        result = _compile_workflow_texts(workflows)
 
-        assert "## Required Workflows" in result
-        assert "directives, not suggestions" in result
         assert "### Test" in result
         assert "WHEN test: do it" in result
 
-    def test_high_priority_always_included(self):
-        """High priority workflows are always included regardless of budget."""
-        long_text = "x" * 4000  # ~1000 tokens, exceeds budget
-        workflows = [_make_workflow(priority="high", compile_to=long_text)]
-        result = _compile_workflow_section(workflows)
-
-        assert long_text in result
-
-    def test_medium_skipped_when_budget_exhausted(self):
-        """Medium priority workflows are skipped when budget is exhausted."""
-        long_high = "H" * 3200  # ~800 tokens, fills budget
+    def test_filters_by_compile_to(self):
+        """Only workflows with compile_to='mcp_instructions' are included."""
         workflows = [
-            _make_workflow(name="high-one", priority="high", compile_to=long_high),
-            _make_workflow(name="medium-one", priority="medium", compile_to="Medium text"),
+            _make_workflow(name="included", compile_to="mcp_instructions", text="Included text"),
+            _make_workflow(name="excluded", compile_to="other_target", text="Excluded text"),
         ]
-        result = _compile_workflow_section(workflows)
+        result = _compile_workflow_texts(workflows)
 
-        assert long_high in result
-        assert "Medium text" not in result
+        assert "Included text" in result
+        assert "Excluded text" not in result
 
-    def test_medium_included_when_budget_available(self):
-        """Medium priority workflows are included when budget allows."""
-        short_high = "WHEN test: short"
+    def test_empty_text_skipped(self):
+        """Workflows with empty text are skipped."""
         workflows = [
-            _make_workflow(name="high-one", priority="high", compile_to=short_high),
-            _make_workflow(name="medium-one", priority="medium", compile_to="WHEN medium: test"),
+            _make_workflow(text="   "),
+            _make_workflow(name="valid", text="Valid text"),
         ]
-        result = _compile_workflow_section(workflows)
+        result = _compile_workflow_texts(workflows)
 
-        assert short_high in result
-        assert "WHEN medium: test" in result
+        assert "Valid text" in result
 
     def test_multiple_workflows_joined(self):
         """Multiple workflows are separated by double newlines."""
         workflows = [
-            _make_workflow(name="first", compile_to="First directive"),
-            _make_workflow(name="second", compile_to="Second directive"),
+            _make_workflow(name="first", text="First directive"),
+            _make_workflow(name="second", text="Second directive"),
         ]
-        result = _compile_workflow_section(workflows)
+        result = _compile_workflow_texts(workflows)
 
         assert "First directive" in result
         assert "Second directive" in result
 
+    def test_text_emitted_verbatim(self):
+        """Text is emitted without template processing."""
+        raw_text = "### Section\n${VAR} {{template}} %s"
+        workflows = [_make_workflow(text=raw_text)]
+        result = _compile_workflow_texts(workflows)
 
-class TestCompileServerList:
-    """Test server list auto-generation."""
-
-    def test_empty_configs(self):
-        assert _compile_server_list({}) == ""
-
-    def test_generates_sorted_list(self):
-        configs = {
-            "zebra": _make_server("zebra"),
-            "alpha": _make_server("alpha"),
-            "middle": _make_server("middle"),
-        }
-        result = _compile_server_list(configs)
-
-        assert "## Available Servers" in result
-        assert "alpha, middle, zebra" in result
-
-    def test_includes_disabled_servers(self):
-        """Disabled servers are included (discoverable via airis-find)."""
-        configs = {
-            "enabled-one": _make_server("enabled-one", enabled=True),
-            "disabled-one": _make_server("disabled-one", enabled=False),
-        }
-        result = _compile_server_list(configs)
-
-        assert "disabled-one" in result
-        assert "enabled-one" in result
+        assert "${VAR}" in result
+        assert "{{template}}" in result
+        assert "%s" in result
 
 
 class TestCompileInstructionsWithWorkflows:
@@ -403,13 +366,13 @@ class TestCompileInstructionsWithWorkflows:
 
     @patch("app.core.behavior_compiler.format_routing_table_as_instructions", return_value="")
     @patch("app.core.behavior_compiler.load_workflows")
-    def test_workflows_included_in_output(self, mock_load, mock_routing):
-        """Workflow directives appear in compiled instructions."""
+    def test_workflows_replace_routing_guide(self, mock_load, mock_routing):
+        """When workflows exist, their text replaces the hardcoded routing guide."""
         mock_load.return_value = [
             _make_workflow(
                 name="test-wf",
                 servers=["context7"],
-                compile_to="### Test WF\nWHEN test: use context7",
+                text="### Custom Workflow\nWHEN test: use context7",
             )
         ]
         configs = {
@@ -417,28 +380,17 @@ class TestCompileInstructionsWithWorkflows:
         }
         result = compile_instructions(configs)
 
-        assert "## Required Workflows" in result
-        assert "### Test WF" in result
+        assert "### Custom Workflow" in result
         assert "WHEN test: use context7" in result
 
     @patch("app.core.behavior_compiler.format_routing_table_as_instructions", return_value="")
     @patch("app.core.behavior_compiler.load_workflows")
-    def test_fallback_included_when_workflows_exist(self, mock_load, mock_routing):
-        """Fallback section is included when workflows exist."""
-        mock_load.return_value = [_make_workflow()]
-        result = compile_instructions({})
-
-        assert "Tool Discovery Fallback" in result
-        assert "airis-find" in result
-
-    @patch("app.core.behavior_compiler.format_routing_table_as_instructions", return_value="")
-    @patch("app.core.behavior_compiler.load_workflows")
-    def test_no_fallback_without_workflows(self, mock_load, mock_routing):
-        """Fallback section is NOT included when no workflows exist."""
+    def test_no_workflows_uses_routing_guide(self, mock_load, mock_routing):
+        """When no workflows exist, hardcoded routing guide is used."""
         mock_load.return_value = []
         result = compile_instructions({})
 
-        assert "Tool Discovery Fallback" not in result
+        assert "## Tool Routing Guide" in result
 
     @patch("app.core.behavior_compiler.format_routing_table_as_instructions", return_value="")
     @patch("app.core.behavior_compiler.load_workflows")
@@ -468,23 +420,18 @@ class TestCompileInstructionsWithWorkflows:
         }
         result = compile_instructions(configs)
 
-        # context7 behavior should be excluded (covered by workflow)
-        assert "Check docs" not in result or "## Required Workflows" in result
         # stripe behavior should still be included
         assert "Use Stripe" in result
 
     @patch("app.core.behavior_compiler.format_routing_table_as_instructions", return_value="")
     @patch("app.core.behavior_compiler.load_workflows")
-    def test_server_list_auto_generated(self, mock_load, mock_routing):
-        """Available Servers list is auto-generated from configs."""
-        mock_load.return_value = [_make_workflow()]
-        configs = {
-            "context7": _make_server("context7"),
-            "tavily": _make_server("tavily"),
-            "stripe": _make_server("stripe", enabled=False),
-        }
-        result = compile_instructions(configs)
+    def test_non_mcp_instructions_workflows_ignored(self, mock_load, mock_routing):
+        """Workflows with compile_to != 'mcp_instructions' don't affect output."""
+        mock_load.return_value = [
+            _make_workflow(compile_to="other_target", text="Should not appear"),
+        ]
+        result = compile_instructions({})
 
-        assert "## Available Servers" in result
-        assert "context7" in result
-        assert "stripe" in result  # Even disabled servers listed
+        assert "Should not appear" not in result
+        # Falls back to routing guide since no mcp_instructions workflows
+        assert "## Tool Routing Guide" in result

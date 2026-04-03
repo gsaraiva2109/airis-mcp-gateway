@@ -1,13 +1,10 @@
 name: data-query
-description: "Use Supabase for database operations"
+compile_to: mcp_instructions
 priority: high
-max_tokens: 80
 servers:
   - supabase
 
-trigger: "querying, modifying, or analyzing database data"
-
-compile_to: |
+text: |
   ### Database Operations
   WHEN querying, modifying, or analyzing database data:
   1. Call supabase:query with the appropriate SQL statement
