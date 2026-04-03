@@ -289,7 +289,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     switch (name) {
       case "airis_config_add_server": {
         const config = await readConfig();
-        const { name: serverName, command, args: cmdArgs, env, enabled } = args as AddServerArgs;
+        const { name: serverName, command, args: cmdArgs, env, enabled } = args as unknown as AddServerArgs;
 
         if (config.mcpServers[serverName]) {
           throw new Error(`Server already exists: ${serverName}`);
@@ -316,7 +316,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "airis_config_remove_server": {
         const config = await readConfig();
-        const serverName = (args as ServerNameArgs).server_name;
+        const serverName = (args as unknown as ServerNameArgs).server_name;
 
         if (!config.mcpServers[serverName]) {
           throw new Error(`Server not found: ${serverName}`);
@@ -338,7 +338,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "airis_profile_save": {
         await ensureProfilesDir();
         const config = await readConfig();
-        const profileName = (args as ProfileNameArgs).profile_name;
+        const profileName = (args as unknown as ProfileNameArgs).profile_name;
         const profilePath = path.join(PROFILES_DIR, `${profileName}.json`);
 
         await fs.writeFile(profilePath, JSON.stringify(config, null, 2));
@@ -354,7 +354,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "airis_profile_load": {
-        const profileName = (args as ProfileNameArgs).profile_name;
+        const profileName = (args as unknown as ProfileNameArgs).profile_name;
         const profilePath = path.join(PROFILES_DIR, `${profileName}.json`);
 
         const content = await fs.readFile(profilePath, "utf-8");
@@ -400,7 +400,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "airis_mcp_detect": {
-        const { path: repoPath = WORKSPACE_DIR, autoAdd = false } = (args ?? {}) as DetectArgs;
+        const { path: repoPath = WORKSPACE_DIR, autoAdd = false } = (args ?? {}) as unknown as DetectArgs;
         const config = await readConfig();
 
         const detected: Array<{
