@@ -1,0 +1,17 @@
+name: implement-feature
+description: "Enforce official docs lookup before writing any library/API code"
+priority: high
+max_tokens: 250
+servers:
+  - context7
+
+trigger: "implementing with any library, framework, or external API"
+
+compile_to: |
+  ### Implementing with Libraries/APIs
+  WHEN writing code that uses ANY library, framework, or external API:
+  1. FIRST: Call context7:resolve-library-id to identify the library
+  2. THEN: Call context7:query-docs to read official documentation
+  3. THEN: Write implementation following official examples and patterns
+  NEVER skip this workflow. Your training data is outdated.
+  Official documentation has current, working sample code — use it.

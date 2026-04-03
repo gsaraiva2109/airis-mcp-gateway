@@ -102,9 +102,19 @@ services:
       - TOOL_LISTING_MODE=${TOOL_LISTING_MODE:-compact}
       # External API keys (optional)
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      - TWILIO_API_KEY=${TWILIO_API_KEY:-}
+      - TWILIO_API_SECRET=${TWILIO_API_SECRET:-}
+      - CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID:-}
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN:-}
+      - FIGMA_API_KEY=${FIGMA_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - SUPABASE_ACCESS_TOKEN=${SUPABASE_ACCESS_TOKEN:-}
     volumes:
       - ./mcp-config.json:/app/mcp-config.json:ro
       - ./routing-table.json:/app/routing-table.json:ro
+      - ./workflows:/app/workflows:ro
       - ./config/gateway-config.yaml:/app/config/gateway-config.yaml:ro
       - ./profiles:/app/profiles:rw
       # Persistent data volumes (appuser home directory)
