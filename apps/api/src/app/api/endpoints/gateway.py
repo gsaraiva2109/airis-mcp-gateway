@@ -4,6 +4,10 @@ import os
 
 from fastapi import APIRouter, HTTPException, status
 
+from ...core.logging import get_logger
+
+logger = get_logger(__name__)
+
 router = APIRouter(tags=["gateway"])
 
 
@@ -37,16 +41,15 @@ async def restart_gateway():
 
         if proc.returncode != 0:
             stderr = (await proc.stderr.read()).decode() if proc.stderr else ""
+            logger.error(f"Gateway restart failed: {stderr}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to restart gateway: {stderr}",
+                detail="Failed to restart gateway",
             )
 
-        stdout = (await proc.stdout.read()).decode() if proc.stdout else ""
         return {
             "status": "success",
             "message": "MCP Gateway restarted successfully",
-            "output": stdout,
         }
 
     except asyncio.TimeoutError:
@@ -57,9 +60,10 @@ async def restart_gateway():
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Gateway restart unexpected error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected error: {str(e)}",
+            detail="Internal server error",
         )
 
 
@@ -77,7 +81,8 @@ async def gateway_status():
         }
 
     except Exception as e:
+        logger.error(f"Gateway status check failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get gateway status: {str(e)}",
+            detail="Failed to get gateway status",
         )

@@ -291,14 +291,15 @@ def _parse_allowed_origins() -> list[str]:
 
 
 ALLOWED_ORIGINS = _parse_allowed_origins()
-logger.info(f"CORS allowed origins: {ALLOWED_ORIGINS}")
+if ALLOWED_ORIGINS == ["*"]:
+    logger.warning("CORS: wildcard origin enabled (development mode). Set ALLOWED_ORIGINS for production.")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=ALLOWED_ORIGINS != ["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # Optional API key auth - only active if AIRIS_API_KEY env var is set

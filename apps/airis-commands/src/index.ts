@@ -339,6 +339,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         await ensureProfilesDir();
         const config = await readConfig();
         const profileName = (args as unknown as ProfileNameArgs).profile_name;
+        if (!/^[a-zA-Z0-9_-]+$/.test(profileName)) {
+          throw new Error(`Invalid profile name: "${profileName}". Only alphanumeric, hyphens, and underscores are allowed.`);
+        }
         const profilePath = path.join(PROFILES_DIR, `${profileName}.json`);
 
         await fs.writeFile(profilePath, JSON.stringify(config, null, 2));
@@ -355,6 +358,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "airis_profile_load": {
         const profileName = (args as unknown as ProfileNameArgs).profile_name;
+        if (!/^[a-zA-Z0-9_-]+$/.test(profileName)) {
+          throw new Error(`Invalid profile name: "${profileName}". Only alphanumeric, hyphens, and underscores are allowed.`);
+        }
         const profilePath = path.join(PROFILES_DIR, `${profileName}.json`);
 
         const content = await fs.readFile(profilePath, "utf-8");

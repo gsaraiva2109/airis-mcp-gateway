@@ -41,10 +41,15 @@ class EncryptionManager:
                 master_key = self._load_persisted_key()
 
             if not master_key:
+                if os.getenv("ENV", "").lower() == "production":
+                    raise RuntimeError(
+                        "ENCRYPTION_MASTER_KEY must be set explicitly in production. "
+                        "Generate one with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+                    )
                 master_key = Fernet.generate_key().decode()
                 self._persist_key(master_key)
-                logger.info(f"Generated new ENCRYPTION_MASTER_KEY and stored it at {self._key_file_path}")
-                logger.info("Set ENCRYPTION_MASTER_KEY in your environment to override the persisted key")
+                logger.warning(f"Generated new ENCRYPTION_MASTER_KEY and stored it at {self._key_file_path}")
+                logger.warning("Set ENCRYPTION_MASTER_KEY in your environment to override the persisted key")
 
         assert isinstance(master_key, str)
         self.master_key = master_key
@@ -68,8 +73,8 @@ class EncryptionManager:
             salt_path.write_bytes(salt)
             try:
                 os.chmod(salt_path, 0o600)
-            except OSError:
-                pass
+            except OSError as chmod_exc:
+                logger.warning(f"Could not set 0o600 permissions on {salt_path}: {chmod_exc}")
         except OSError as exc:
             logger.warning(f"Failed to persist encryption salt to {salt_path}: {exc}")
         return salt
@@ -128,9 +133,8 @@ class EncryptionManager:
             self._key_file_path.write_text(key, encoding="utf-8")
             try:
                 os.chmod(self._key_file_path, 0o600)
-            except OSError:
-                # Permission adjustments may fail on some platforms (e.g. Windows)
-                pass
+            except OSError as chmod_exc:
+                logger.warning(f"Could not set 0o600 permissions on {self._key_file_path}: {chmod_exc}")
         except OSError as exc:
             logger.warning(f"Failed to persist ENCRYPTION_MASTER_KEY to {self._key_file_path}: {exc}")
 

@@ -250,12 +250,11 @@ class ProcessRunner:
         # Build environment
         env = {**os.environ, **self.config.env}
 
-        # Expand environment variables in args
-        expanded_args = [
-            os.path.expandvars(arg) for arg in self.config.args
-        ]
-
-        cmd = [self.config.command] + expanded_args
+        # Args are already expanded by mcp_config_loader._expand_env_vars()
+        # Do NOT use os.path.expandvars() here — it blindly expands all
+        # environment variables (including secrets) into command-line args
+        # visible in `ps` output and logs.
+        cmd = [self.config.command] + list(self.config.args)
         logger.info(f"Starting {self.config.name}: {' '.join(cmd)}")
 
         try:
