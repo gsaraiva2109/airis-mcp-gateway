@@ -27,6 +27,7 @@ jobs:
             python:
               - 'apps/api/**'
               - 'pyproject.toml'
+              - 'workflows/**'
             typescript:
               - 'apps/gateway-control/**'
               - 'apps/airis-commands/**'

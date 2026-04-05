@@ -41,7 +41,7 @@ services:
     volumes:
       - ${HOST_WORKSPACE_DIR:-${HOME}/github}:/workspaces/projects:rw
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health 2>/dev/null || exit 0"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
