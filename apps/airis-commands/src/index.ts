@@ -18,6 +18,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
+import { fileURLToPath } from "url";
 
 const execAsync = promisify(exec);
 
@@ -35,6 +36,66 @@ import {
   formatDetectionOutput,
   type McpServerConfig,
 } from "./lib.js";
+
+export function buildBridgeSetupGuide(): string {
+  const lines: string[] = [];
+
+  lines.push("The **Infinite Context Bridge** layers complementary tools on top of Airis Gateway.");
+  lines.push("Each layer targets a different source of token waste:\n");
+  lines.push("| Layer | Tool | What it reduces | Savings |");
+  lines.push("|-------|------|----------------|---------|");
+  lines.push("| Tool overhead | **Airis Dynamic MCP** | Tool schema bloat | ~98% ✅ already active |");
+  lines.push("| Bash output | **RTK** | Command output tokens | 60–90% |");
+  lines.push("| Session memory | **ICM** *(optional)* | Repeated context re-injection | cross-session recall |");
+  lines.push("");
+
+  lines.push("---");
+  lines.push("");
+  lines.push("### Layer 1 — RTK (Bash Output Token Reduction)");
+  lines.push("");
+  lines.push("RTK intercepts Bash tool calls and compresses output before it reaches your context window.");
+  lines.push("Supports 100+ commands (git, npm, pytest, docker, kubectl…) with 60–90% output reduction.");
+  lines.push("");
+  lines.push("**Install:**");
+  lines.push("```bash");
+  lines.push("curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh");
+  lines.push("```");
+  lines.push("");
+  lines.push("**Enable Claude Code hooks** (transparent — zero overhead):");
+  lines.push("```bash");
+  lines.push("rtk init -g");
+  lines.push("```");
+  lines.push("");
+  lines.push("This writes a `PreToolUse` hook that rewrites bash commands like `git status` → `rtk git status` automatically.");
+  lines.push("");
+  lines.push("> GitHub: https://github.com/rtk-ai/rtk");
+  lines.push("");
+
+  lines.push("---");
+  lines.push("");
+  lines.push("### Layer 2 — ICM (Persistent Cross-Session Memory) *(optional)*");
+  lines.push("");
+  lines.push("ICM gives your AI agent durable episodic memory and a knowledge graph that persists across sessions.");
+  lines.push("Reduces repeated context re-injection by recalling only what's relevant to the current task.");
+  lines.push("");
+  lines.push("**Install:**");
+  lines.push("```bash");
+  lines.push("# macOS");
+  lines.push("brew tap rtk-ai/tap && brew install icm");
+  lines.push("");
+  lines.push("# Linux / other");
+  lines.push("curl -fsSL https://raw.githubusercontent.com/rtk-ai/icm/main/install.sh | sh");
+  lines.push("```");
+  lines.push("");
+  lines.push("**Register with Claude Code:**");
+  lines.push("```bash");
+  lines.push("claude mcp add --scope user icm -- icm serve");
+  lines.push("```");
+  lines.push("");
+  lines.push("> GitHub: https://github.com/rtk-ai/icm");
+
+  return "# Infinite Context Bridge Setup Guide\n\n" + lines.join("\n");
+}
 
 const CONFIG_PATH = process.env.MCP_CONFIG_PATH || "/app/mcp-config.json";
 const PROFILES_DIR = process.env.PROFILES_DIR || "/app/profiles";
@@ -186,7 +247,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       // ── Bridge Extensions ──
       {
         name: "airis_bridge_setup",
-        description: "(Optional) Setup the Infinite Context Bridge. Links NCP discovery and ICM memory to the Airis Gateway for token efficiency and project-specific ranking. Requires NCP and ICM to be installed on the host.",
+        description: "(Optional) Setup the Infinite Context Bridge. Layers RTK (bash output token reduction) and ICM (persistent cross-session memory) on top of Airis Gateway for maximum token efficiency.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -368,38 +429,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "airis_bridge_setup": {
-        const results: string[] = [];
-
-        results.push("The **Infinite Context** stack optimizes your AI workflow by combining intelligent discovery (NCP), efficient filtering (RTK), and long-term memory (ICM).\n");
-
-        results.push("### 1. Install CLI Tools");
-        results.push("These tools run on your host machine to augment the Airis Gateway:");
-        results.push("- **RTK (Runtime Token Kit):** [GitHub](https://github.com/rtk-ai/rtk) | [Site](https://www.rtk-ai.app/)");
-        results.push("  `curl -fsSL https://rtk-ai.app/install.sh | bash` (Example command)");
-        results.push("- **ICM (Infinite Context Memory):** [GitHub](https://github.com/rtk-ai/icm)");
-        results.push("  `curl -fsSL https://rtk-ai.app/icm/install.sh | bash` (Example command)");
-        results.push("- **NCP (Natural Context Protocol):** [GitHub](https://github.com/portel-dev/ncp)");
-        results.push("  `npm install -g @portel-dev/ncp` (Example command)");
-        results.push("");
-
-        results.push("### 2. Configure Bridge");
-        results.push("Once installed, run these commands on your host to link everything together:");
-        results.push("```bash");
-        results.push("# A. Link ICM Memory to RTK context");
-        results.push("mkdir -p ~/.rtk");
-        results.push("ln -sf \"$HOME/.local/share/icm/memories.db\" \"$HOME/.rtk/icm.db\"");
-        results.push("");
-        results.push("# B. Link Airis tools to NCP discovery");
-        results.push("ncp_bin=\"$(which ncp)\"");
-        results.push("for tool in filesystem memory github tavily supabase stripe context7 sequential-thinking serena; do");
-        results.push("  $ncp_bin add \"$tool\" \"airis-mcp-gateway exec $tool\"");
-        results.push("done");
-        results.push("```");
-
         return {
           content: [{
             type: "text",
-            text: "# Infinite Context Bridge Setup Guide\n\n" + results.join("\n")
+            text: buildBridgeSetupGuide(),
           }]
         };
       }
@@ -423,7 +456,10 @@ async function main() {
   console.error("AIRIS Commands MCP server running on stdio");
 }
 
-main().catch((error) => {
-  console.error("Fatal error:", error);
-  process.exit(1);
-});
+// Only start when executed directly — not when imported by tests
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error("Fatal error:", error);
+    process.exit(1);
+  });
+}

@@ -20,17 +20,17 @@ cmd_help() {
     cat <<EOF
 AIRIS Infinite Context Bridge (Optional Tool)
 
-This script extends airis-mcp-gateway with "Infinite Context" features:
-- Tool Discovery (meta-tools)
-- Token Optimization (RTK)
-- Memory Ranking (ICM)
+This script extends airis-mcp-gateway with "Infinite Context Bridge" layers:
+- Layer 1 (active):   Airis Dynamic MCP    — ~98% tool schema token reduction
+- Layer 2 (optional): RTK                  — 60-90% bash output token reduction
+- Layer 3 (optional): ICM                  — persistent cross-session memory
 
 Usage: airis-mcp-gateway <command> [options]
 
 Commands:
-  exec <tool> [--params <json>]  Execute any tool with auto-enablement
-  bridge ncp                     (Optional) Link all MCP servers to NCP
-  bridge icm                     (Optional) Link ICM database to RTK context
+  exec <tool> [--params <json>]  Execute any gateway tool with auto-enablement
+  bridge rtk                     Install RTK hooks for Claude Code
+  bridge icm                     Register ICM memory MCP with Claude Code
 
 Environment variables:
   AIRIS_API_URL       API URL (default: http://localhost:9400)
@@ -38,6 +38,8 @@ Environment variables:
 Examples:
   airis-mcp-gateway exec airis-find --params '{"query": "memory"}'
   airis-mcp-gateway exec filesystem:list_directory --params '{"path": "/workspace/host"}'
+  airis-mcp-gateway bridge rtk
+  airis-mcp-gateway bridge icm
 EOF
 }
 
@@ -99,24 +101,35 @@ case "${1:-help}" in
     bridge)
         shift
         case "${1:-help}" in
-            ncp)
-                log_info "Linking servers to NCP..."
-                NCP_BIN=$(command -v ncp 2>/dev/null || true)
-                if [ -z "$NCP_BIN" ]; then log_error "NCP not found. Install with: npm install -g @portel-dev/ncp"; exit 1; fi
-                SCRIPT_PATH=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
-                for tool in filesystem memory github tavily supabase stripe context7 sequential-thinking serena; do
-                    "$NCP_BIN" add "$tool" "$SCRIPT_PATH exec $tool"
-                done
-                log_info "NCP bridge complete."
-                ;;
             icm)
-                log_info "Linking ICM database to RTK context..."
-                mkdir -p ~/.rtk
-                ln -sf "$HOME/.local/share/icm/memories.db" "$HOME/.rtk/icm.db"
-                log_info "ICM memory bridge active."
+                log_info "Registering ICM with Claude Code (user scope)..."
+                if ! command -v icm >/dev/null 2>&1; then
+                    log_error "ICM not found. Install from: https://github.com/rtk-ai/icm"
+                    exit 1
+                fi
+                if ! command -v claude >/dev/null 2>&1; then
+                    log_error "Claude Code CLI not found. Install from: https://claude.ai/code"
+                    exit 1
+                fi
+                if claude mcp get icm >/dev/null 2>&1; then
+                    log_info "ICM is already registered with Claude Code."
+                else
+                    claude mcp add --scope user icm -- icm serve
+                    log_info "ICM registered. Restart Claude Code to activate."
+                fi
+                ;;
+            rtk)
+                log_info "Installing RTK hooks for Claude Code..."
+                if ! command -v rtk >/dev/null 2>&1; then
+                    log_error "RTK not found. Install with:"
+                    log_error "  curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh"
+                    exit 1
+                fi
+                rtk init -g
+                log_info "RTK hooks active. Bash commands will be optimized automatically."
                 ;;
             *)
-                log_error "Usage: airis-mcp-gateway bridge <ncp|icm>"
+                log_error "Usage: airis-mcp-gateway bridge <rtk|icm>"
                 exit 1
                 ;;
         esac
